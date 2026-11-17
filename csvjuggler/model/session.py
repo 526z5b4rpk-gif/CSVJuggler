@@ -8,6 +8,12 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
 from csvjuggler.data.dataset import Dataset
+from csvjuggler.data.derived import (
+    DERIVED_ALIAS,
+    DerivedSeriesConfig,
+    FormulaError,
+    evaluate,
+)
 from csvjuggler.data.importer import (
     ImportSettings,
     ProgressCallback,
@@ -39,12 +45,22 @@ class Session(QObject):
         super().__init__(parent)
         self._datasets: dict[str, Dataset] = {}
         self.annotations = AnnotationStore(self)
+        self._derived: list[DerivedSeriesConfig] = []
+        self.derived_errors: dict[str, str] = {}
+        """Derived series name → error message of its last evaluation."""
 
     # -- datasets -------------------------------------------------------------------------
 
     @property
     def datasets(self) -> list[Dataset]:
-        return list(self._datasets.values())
+        """File datasets, then the derived series dataset (if any)."""
+        files = [d for a, d in self._datasets.items() if a != DERIVED_ALIAS]
+        derived = self._datasets.get(DERIVED_ALIAS)
+        return files + ([derived] if derived is not None else [])
+
+    @property
+    def file_datasets(self) -> list[Dataset]:
+        return [d for a, d in self._datasets.items() if a != DERIVED_ALIAS]
 
     def dataset(self, alias: str) -> Dataset | None:
         return self._datasets.get(alias)
@@ -52,7 +68,7 @@ class Session(QObject):
     def unique_alias(self, base: str) -> str:
         base = base.replace("/", "_") or "dataset"
         alias, n = base, 2
-        while alias in self._datasets:
+        while alias in self._datasets or alias == DERIVED_ALIAS:
             alias = f"{base}_{n}"
             n += 1
         return alias
@@ -61,6 +77,7 @@ class Session(QObject):
         if dataset.alias in self._datasets:
             dataset.rename(self.unique_alias(dataset.alias))
         self._datasets[dataset.alias] = dataset
+        self._recompute_derived(emit=False)
         self.datasets_changed.emit()
         self._load_companion(dataset)
         return dataset
@@ -129,13 +146,74 @@ class Session(QObject):
         dataset.time_label = fresh.time_label
         for s in dataset.series.values():
             s.source = alias
-        if list(dataset.series) != names_before:
+        derived_before = self._derived_names()
+        self._recompute_derived(emit=False)
+        if list(dataset.series) != names_before or self._derived_names() != derived_before:
             self.datasets_changed.emit()
         self.series_data_changed.emit(alias)
+        if self._derived:
+            self.series_data_changed.emit(DERIVED_ALIAS)
 
     def remove_dataset(self, alias: str) -> None:
-        if self._datasets.pop(alias, None) is not None:
+        if alias != DERIVED_ALIAS and self._datasets.pop(alias, None) is not None:
+            self._recompute_derived(emit=False)
             self.datasets_changed.emit()
+
+    # -- derived series -------------------------------------------------------------------
+
+    @property
+    def derived(self) -> list[DerivedSeriesConfig]:
+        return list(self._derived)
+
+    def _derived_names(self) -> list[str]:
+        ds = self._datasets.get(DERIVED_ALIAS)
+        return list(ds.series) if ds else []
+
+    def check_derived(self, config: DerivedSeriesConfig) -> None:
+        """Raise :class:`FormulaError` if ``config`` cannot be computed now."""
+        evaluate(config, self.get_series)
+
+    def set_derived(self, configs: list[DerivedSeriesConfig]) -> None:
+        """Replace all derived series definitions (layout loading)."""
+        self._derived = list(configs)
+        self._recompute_derived()
+
+    def add_derived(self, config: DerivedSeriesConfig) -> None:
+        """Add or replace (same name) a derived series. Raises :class:`FormulaError`."""
+        if not config.name or "/" in config.name:
+            raise FormulaError("Nom de série invalide.")
+        self.check_derived(config)
+        self._derived = [c for c in self._derived if c.name != config.name] + [config]
+        self._recompute_derived()
+
+    def remove_derived(self, name: str) -> None:
+        self._derived = [c for c in self._derived if c.name != name]
+        self._recompute_derived()
+
+    def derived_config(self, name: str) -> DerivedSeriesConfig | None:
+        return next((c for c in self._derived if c.name == name), None)
+
+    def _recompute_derived(self, emit: bool = True) -> None:
+        """Evaluate every derived series (in order: one may use a previous one)."""
+        dataset = self._datasets.get(DERIVED_ALIAS) or Dataset(alias=DERIVED_ALIAS)
+        renames = {s.name: s.display_name for s in dataset.series.values() if s.display_name}
+        dataset.series = {}
+        self._datasets[DERIVED_ALIAS] = dataset
+        self.derived_errors = {}
+        for config in self._derived:
+            try:
+                series = evaluate(config, self.get_series)
+            except FormulaError as exc:
+                self.derived_errors[config.name] = str(exc)
+                log.warning("Derived series %r: %s", config.name, exc)
+                continue
+            series.display_name = renames.get(config.name)
+            dataset.series[config.name] = series
+        if not self._derived:
+            del self._datasets[DERIVED_ALIAS]
+        if emit:
+            self.datasets_changed.emit()
+            self.series_data_changed.emit(DERIVED_ALIAS)
 
     # -- series ---------------------------------------------------------------------------
 

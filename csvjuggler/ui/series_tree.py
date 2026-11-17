@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from PySide6.QtCore import QMimeData, QModelIndex, QPersistentModelIndex, QSortFilterProxyModel, Qt
+from PySide6.QtCore import (
+    QMimeData,
+    QModelIndex,
+    QPersistentModelIndex,
+    QPoint,
+    QSortFilterProxyModel,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import QAbstractItemView, QLineEdit, QTreeView, QVBoxLayout, QWidget
 
@@ -88,6 +96,9 @@ class SeriesModel(QStandardItemModel):
 
 
 class SeriesTree(QWidget):
+    context_menu_requested = Signal(list, QPoint)
+    """Right click: ``(selected series ids, global position)``."""
+
     def __init__(self, session: Session, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.model = SeriesModel(session, self)
@@ -108,6 +119,12 @@ class SeriesTree(QWidget):
         self.view.setDragEnabled(True)
         self.view.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
         self.view.setDefaultDropAction(Qt.DropAction.CopyAction)
+        self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.view.customContextMenuRequested.connect(
+            lambda pos: self.context_menu_requested.emit(
+                self.selected_series_ids(), self.view.viewport().mapToGlobal(pos)
+            )
+        )
         self.model.modelReset.connect(self.view.expandAll)
         self.proxy.rowsInserted.connect(lambda *_: self.view.expandAll())
 
@@ -116,6 +133,16 @@ class SeriesTree(QWidget):
         layout.addWidget(self.filter_edit)
         layout.addWidget(self.view)
         self.view.expandAll()
+
+    def edit_series(self, series_id: str) -> None:
+        """Start editing the display name of a series."""
+        for row in range(self.model.rowCount()):
+            ds_item = self.model.item(row)
+            for child_row in range(ds_item.rowCount()):
+                child = ds_item.child(child_row)
+                if child.data(SERIES_ID_ROLE) == series_id:
+                    self.view.edit(self.proxy.mapFromSource(child.index()))
+                    return
 
     def selected_series_ids(self) -> list[str]:
         indexes = [self.proxy.mapToSource(i) for i in self.view.selectionModel().selectedIndexes()]

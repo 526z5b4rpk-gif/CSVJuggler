@@ -10,7 +10,8 @@ from collections.abc import Callable, Iterable
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer
+import pyqtgraph.exporters
+from PySide6.QtCore import QByteArray, QPoint, QRectF, QSettings, Qt, QTimer
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -18,10 +19,14 @@ from PySide6.QtGui import (
     QDragEnterEvent,
     QDropEvent,
     QKeySequence,
+    QPainter,
 )
+from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtWidgets import (
+    QApplication,
     QDockWidget,
     QFileDialog,
+    QGraphicsView,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -29,6 +34,8 @@ from PySide6.QtWidgets import (
 )
 
 from csvjuggler.data.dataset import Dataset
+from csvjuggler.data.derived import DERIVED_ALIAS, DerivedSeriesConfig, FormulaError
+from csvjuggler.data.export import export_csv
 from csvjuggler.data.importer import (
     CsvImportCancelled,
     CsvImportError,
@@ -51,6 +58,8 @@ from csvjuggler.model.session import Session
 from csvjuggler.ui.annotation_items import AnnotationManager
 from csvjuggler.ui.annotation_panel import AnnotationPanel
 from csvjuggler.ui.dialogs.annotation_dialog import edit_annotation
+from csvjuggler.ui.dialogs.derived_dialog import DerivedDialog
+from csvjuggler.ui.dialogs.export_dialog import ExportCsvDialog
 from csvjuggler.ui.dialogs.import_dialog import ImportDialog
 from csvjuggler.ui.measure_panel import MeasurePanel
 from csvjuggler.ui.plot_dock import PlotDock
@@ -76,6 +85,29 @@ def _load(
     path: Path, settings: ImportSettings | None, alias: str, report: ProgressCallback
 ) -> Dataset:
     return load_csv(path, settings, alias, report)
+
+
+def _render_svg(widget: QWidget, path: Path) -> None:
+    """Vector rendering of ``widget`` (and its children) into an SVG file."""
+    # SVG 1.1 keeps the clip paths (curves clipped to their view boxes; Tiny 1.2 has none),
+    # and the widget's DPI keeps text metrics and layout identical to the screen.
+    generator = QSvgGenerator(QSvgGenerator.SvgVersion.Svg11)
+    generator.setResolution(widget.logicalDpiX())
+    generator.setFileName(str(path))
+    generator.setSize(widget.size())
+    generator.setViewBox(QRectF(0, 0, widget.width(), widget.height()))
+    generator.setTitle(tr(Msg.APP_NAME))
+    painter = QPainter(generator)
+    try:
+        if isinstance(widget, QGraphicsView):
+            # QGraphicsView.render() is the scene-rendering overload.
+            widget.render(
+                painter, QRectF(0, 0, widget.width(), widget.height()), widget.viewport().rect()
+            )
+        else:
+            widget.render(painter, QPoint())
+    finally:
+        painter.end()
 
 
 class MainWindow(QMainWindow):
@@ -111,8 +143,6 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, tree_dock)
 
         self._plot_counter = 0
-        self.layout_extensions: list[Callable[[Layout], None]] = []
-        """Called after a layout is applied (derived series…)."""
         self.plot_docks: list[PlotDock] = []
         self.current_dock: PlotDock | None = None
         self.x_sync = XSyncManager(self)
@@ -147,6 +177,7 @@ class MainWindow(QMainWindow):
         session.series_data_changed.connect(self._on_series_data_changed)
         session.series_names_changed.connect(self._refresh_all_plots)
         session.datasets_changed.connect(self._refresh_all_plots)
+        self.series_tree.context_menu_requested.connect(self._on_tree_menu)
         self.new_plot()
 
     # -- menus ----------------------------------------------------------------------------
@@ -216,6 +247,19 @@ class MainWindow(QMainWindow):
         ab_action.setShortcut(QKeySequence("Ctrl+B"))
         ab_action.triggered.connect(self.toggle_current_cursors)
         measure_menu.addAction(ab_action)
+
+        series_menu = self.menuBar().addMenu(tr(Msg.MENU_SERIES))
+        series_menu.addAction(tr(Msg.ACTION_NEW_DERIVED), self.new_derived_series)
+
+        export_menu = self.menuBar().addMenu(tr(Msg.MENU_EXPORT))
+        export_menu.addAction(tr(Msg.ACTION_EXPORT_PLOT_IMAGE), self._on_export_plot_image)
+        export_menu.addAction(tr(Msg.ACTION_EXPORT_WINDOW_IMAGE), self._on_export_window_image)
+        copy_image = QAction(tr(Msg.ACTION_COPY_PLOT_IMAGE), self)
+        copy_image.setShortcut(QKeySequence("Ctrl+Shift+C"))
+        copy_image.triggered.connect(self.copy_plot_image)
+        export_menu.addAction(copy_image)
+        export_menu.addSeparator()
+        export_menu.addAction(tr(Msg.ACTION_EXPORT_CSV), self._on_export_csv)
 
     # -- plots ----------------------------------------------------------------------------
 
@@ -416,6 +460,159 @@ class MainWindow(QMainWindow):
         )
         self.open_files(paths)
 
+    # -- derived series -------------------------------------------------------------------
+
+    def new_derived_series(self, preselected: list[str] | None = None) -> None:
+        ids = preselected if preselected is not None else self.series_tree.selected_series_ids()
+        dialog = DerivedDialog(self.session, preselected=ids, parent=self)
+        if dialog.exec() == DerivedDialog.DialogCode.Accepted:
+            self._store_derived(dialog.config())
+
+    def edit_derived_series(self, name: str) -> None:
+        config = self.session.derived_config(name)
+        if config is None:
+            return
+        dialog = DerivedDialog(self.session, config, parent=self)
+        if dialog.exec() == DerivedDialog.DialogCode.Accepted:
+            new = dialog.config()
+            if new.name != name:
+                self.session.remove_derived(name)
+            self._store_derived(new)
+
+    def _store_derived(self, config: DerivedSeriesConfig) -> None:
+        try:
+            self.session.add_derived(config)
+        except FormulaError as exc:
+            QMessageBox.warning(self, tr(Msg.DERIVED_TITLE), str(exc))
+
+    def _on_tree_menu(self, series_ids: list[str], global_pos: QPoint) -> None:
+        self.build_tree_menu(series_ids).exec(global_pos)
+
+    def build_tree_menu(self, series_ids: list[str]) -> QMenu:
+        menu = QMenu(self)
+        menu.addAction(
+            tr(Msg.ACTION_NEW_DERIVED), partial(self.new_derived_series, list(series_ids))
+        )
+        if len(series_ids) == 1:
+            series_id = series_ids[0]
+            menu.addAction(
+                tr(Msg.ACTION_RENAME_SERIES), partial(self.series_tree.edit_series, series_id)
+            )
+            alias, _, name = series_id.partition("/")
+            if alias == DERIVED_ALIAS:
+                menu.addSeparator()
+                menu.addAction(tr(Msg.ACTION_EDIT_DERIVED), partial(self.edit_derived_series, name))
+                menu.addAction(
+                    tr(Msg.ACTION_DELETE_DERIVED), partial(self.session.remove_derived, name)
+                )
+        return menu
+
+    # -- export ---------------------------------------------------------------------------
+
+    def _require_plot(self) -> PlotDock | None:
+        if self.current_dock is None:
+            QMessageBox.information(self, tr(Msg.EXPORT_ERROR_TITLE), tr(Msg.EXPORT_NO_PLOT))
+        return self.current_dock
+
+    def export_plot_image(self, path: str | Path, dock: PlotDock | None = None) -> Path:
+        """PNG or SVG (by extension) of a graph, annotations and secondary axes included."""
+        dock = dock or self.current_dock
+        if dock is None:
+            raise ValueError("no graph")
+        path = Path(path)
+        if path.suffix.lower() == ".svg":
+            # pyqtgraph's SVGExporter cannot parse the SVG paths written by recent Qt
+            # versions: render the view through Qt's own SVG generator instead.
+            _render_svg(dock.plot, path)
+        else:
+            # The whole scene: secondary ViewBoxes are top-level scene items.
+            pyqtgraph.exporters.ImageExporter(dock.plot.scene()).export(str(path))
+        return path
+
+    def export_window_image(self, path: str | Path) -> Path:
+        """PNG or SVG of the whole graph area."""
+        path = Path(path)
+        if path.suffix.lower() == ".svg":
+            _render_svg(self.plot_area, path)
+        else:
+            self.plot_area.grab().save(str(path))
+        return path
+
+    def copy_plot_image(self) -> None:
+        dock = self._require_plot()
+        if dock is not None:
+            QApplication.clipboard().setImage(dock.plot.grab().toImage())
+            self.statusBar().showMessage(tr(Msg.EXPORT_COPIED), 5000)
+
+    def _ask_image_path(self) -> Path | None:
+        path, selected = QFileDialog.getSaveFileName(
+            self, tr(Msg.ACTION_EXPORT_PLOT_IMAGE), "", tr(Msg.IMAGE_FILTER)
+        )
+        if not path:
+            return None
+        result = Path(path)
+        if result.suffix.lower() not in (".png", ".svg"):
+            result = result.with_suffix(".svg" if "svg" in selected.lower() else ".png")
+        return result
+
+    def _on_export_plot_image(self) -> None:
+        if self._require_plot() is None or (path := self._ask_image_path()) is None:
+            return
+        self._report_export(lambda: self.export_plot_image(path))
+
+    def _on_export_window_image(self) -> None:
+        path = self._ask_image_path()
+        if path is not None:
+            self._report_export(lambda: self.export_window_image(path))
+
+    def _report_export(self, action: Callable[[], Path]) -> None:
+        try:
+            path = action()
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, tr(Msg.EXPORT_ERROR_TITLE), str(exc))
+            return
+        self.statusBar().showMessage(tr(Msg.EXPORT_IMAGE_DONE).format(path=path), 5000)
+
+    def export_ranges(self, dock: PlotDock) -> list[tuple[str, float, float]]:
+        """Visible range, A/B cursors, selected region: from the least to the most specific."""
+        lo, hi = dock.plot.x_range()
+        ranges = [(tr(Msg.EXPORT_RANGE_VIEW), lo, hi)]
+        if dock.cursors.enabled:
+            a, b = sorted((dock.cursors.a, dock.cursors.b))
+            ranges.append((tr(Msg.EXPORT_RANGE_AB), a, b))
+        layer = dock.plot.annotation_layer
+        if layer is not None and layer.selected_id:
+            ann = self.session.annotations.get(layer.selected_id)
+            if ann is not None and ann.kind == "region":
+                ranges.append((f"{tr(Msg.EXPORT_RANGE_REGION)} « {ann.text} »", ann.x, ann.x2))
+        return ranges
+
+    def _on_export_csv(self) -> None:
+        dock = self._require_plot()
+        if dock is None:
+            return
+        curves = dock.plot.config.all_curves()
+        dialog = ExportCsvDialog(
+            self.export_ranges(dock),
+            [(dock.plot.series_label(c), c.series_id, c.visible) for c in curves],
+            self,
+        )
+        if dialog.exec() != ExportCsvDialog.DialogCode.Accepted:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr(Msg.EXPORT_CSV_TITLE), "", tr(Msg.CSV_FILTER)
+        )
+        if not path:
+            return
+        series = [s for sid in dialog.series_ids() if (s := self.session.get_series(sid))]
+        x0, x1 = dialog.interval()
+        try:
+            rows = export_csv(path, series, x0, x1, dialog.options())
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, tr(Msg.EXPORT_ERROR_TITLE), str(exc))
+            return
+        self.statusBar().showMessage(tr(Msg.EXPORT_DONE).format(rows=rows, path=path), 5000)
+
     # -- recent files ---------------------------------------------------------------------
 
     def recent(self, key: str) -> list[str]:
@@ -459,6 +656,7 @@ class MainWindow(QMainWindow):
             dock_state=bytes(self.plot_area.saveState().toBase64().data()).decode("ascii"),
             window_state=bytes(self.saveState().toBase64().data()).decode("ascii"),
             annotations=self.session.annotations.all(),
+            derived=[c.to_dict() for c in self.session.derived],
         )
 
     def save_layout(self, path: str | Path) -> Path:
@@ -496,11 +694,10 @@ class MainWindow(QMainWindow):
         self._load_layout_datasets(layout, path.parent, overrides, interactive)
         if len(overrides) > len(layout.datasets):
             self.open_files(overrides[len(layout.datasets) :], interactive=False)
+        self.session.set_derived([DerivedSeriesConfig.from_dict(d) for d in layout.derived])
         self._apply_layout_docks(layout)
         self.session.reload_companions()
         self.session.annotations.merge(layout.annotations)
-        for extension in self.layout_extensions:
-            extension(layout)
 
         self.layout_path = path
         self._push_recent(KEY_RECENT_LAYOUTS, path)

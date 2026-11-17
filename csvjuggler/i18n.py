@@ -245,6 +245,48 @@ class Msg:
     COL_P2P = "Pic-pic"
     COL_COUNT = "Points"
 
+    # Derived series
+    MENU_SERIES = "&Séries"
+    ACTION_NEW_DERIVED = "Nouvelle série &calculée…"
+    ACTION_EDIT_DERIVED = "Modifier la formule…"
+    ACTION_DELETE_DERIVED = "Supprimer la série calculée"
+    ACTION_RENAME_SERIES = "Renommer…"
+    DERIVED_TITLE = "Série calculée"
+    DERIVED_NAME = "Nom :"
+    DERIVED_FORMULA = "Formule :"
+    DERIVED_UNIT = "Unité :"
+    DERIVED_VARIABLES = "Variables"
+    DERIVED_VAR = "Variable"
+    DERIVED_SERIES = "Série"
+    DERIVED_ADD_VAR = "Ajouter une variable"
+    DERIVED_HELP = (
+        "Opérateurs : + - * / ** %, comparaisons (> < >= <= == !=), constantes pi et e.\n"
+        "Fonctions : derivative(a), integral(a), lowpass(a, fc_Hz), abs, sqrt, exp, log, "
+        "log10, sin, cos, tan, minimum(a, b), maximum(a, b), clip(a, min, max).\n"
+        "Les variables sont rééchantillonnées sur le temps de la première variable."
+    )
+    DERIVED_ERROR = "Erreur : {error}"
+
+    # Export
+    MENU_EXPORT = "E&xport"
+    ACTION_EXPORT_PLOT_IMAGE = "Exporter le &graphe (PNG/SVG)…"
+    ACTION_EXPORT_WINDOW_IMAGE = "Exporter la &fenêtre (PNG/SVG)…"
+    ACTION_COPY_PLOT_IMAGE = "&Copier l'image du graphe"
+    ACTION_EXPORT_CSV = "Exporter les &données (CSV)…"
+    IMAGE_FILTER = "Image PNG (*.png);;Image SVG (*.svg)"
+    CSV_FILTER = "CSV (*.csv)"
+    EXPORT_CSV_TITLE = "Exporter les données"
+    EXPORT_RANGE = "Plage :"
+    EXPORT_RANGE_VIEW = "Plage visible"
+    EXPORT_RANGE_AB = "Entre les curseurs A et B"
+    EXPORT_RANGE_REGION = "Région sélectionnée"
+    EXPORT_SERIES = "Séries à exporter"
+    EXPORT_DONE = "{rows} lignes exportées dans {path}"
+    EXPORT_IMAGE_DONE = "Image enregistrée : {path}"
+    EXPORT_COPIED = "Image copiée dans le presse-papiers"
+    EXPORT_ERROR_TITLE = "Erreur d'export"
+    EXPORT_NO_PLOT = "Aucun graphe actif."
+
     # Status bar
     STATUS_LOADED = "« {alias} » chargé : {count} séries, {points} points"
     STATUS_MISSING_SERIES = "Série introuvable : {series_id}"

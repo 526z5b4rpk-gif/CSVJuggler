@@ -35,7 +35,9 @@ csvjuggler/
 │   ├── scope_importer.py  # Spécificités des exports TwinCAT Scope
 │   ├── dataset.py         # Dataset : temps + séries, métadonnées, rechargement
 │   ├── series.py          # Series : nom, unité, np.ndarray x/y, source
-│   └── derived.py         # Séries calculées (formules)
+│   ├── derived.py         # Séries calculées (formules, évaluation sans eval)
+│   ├── export.py          # Export CSV d'une plage
+│   └── analysis.py        # Valeur à x, statistiques, TSV (fonctions pures)
 ├── model/
 │   ├── plot_config.py     # Dataclasses : PlotConfig, AxisConfig, CurveConfig...
 │   ├── annotation.py      # Dataclasses : Annotation (texte, ligne V/H, région)
@@ -59,7 +61,9 @@ csvjuggler/
 │       ├── import_dialog.py
 │       ├── plot_settings_dialog.py
 │       ├── curve_settings_dialog.py
-│       └── annotation_dialog.py
+│       ├── annotation_dialog.py
+│       ├── derived_dialog.py
+│       └── export_dialog.py
 └── utils/
     └── colors.py          # Palette par défaut, cycle de couleurs
 tests/
@@ -237,11 +241,11 @@ Valide chaque phase (démo et tests verts) avant de passer à la suivante. Une p
 - [x] Phase 6 — Annotations (4 types, déplacement, édition, Suppr, panneau, lignes liées, fichier compagnon)
 - [x] Phase 7 — Layouts (*.cjl.json versionné, réapplication sur un autre CSV, séries manquantes signalées, récents, dernier layout)
 - [x] Phase 8 — Mesure (tracker T synchronisé, interpolation/plus proche, curseurs A/B, statistiques A–B ou région, copie TSV)
-- [ ] Phase 9 — Séries calculées et export
+- [x] Phase 9 — Séries calculées et export (formules sûres via ast, lowpass vectorisé, PNG/SVG graphe et fenêtre, presse-papiers, CSV)
 
 ### Décisions prises
 
-- **Docks : `QDockWidget`** (pas `pyqtgraph.dockarea`). Raisons : onglets, détachement en fenêtre flottante et fenêtres natives gérés par Qt ; `QMainWindow.saveState/restoreState` pour la géométrie (stockée en base64 dans le layout JSON, en phase 7) ; meilleure intégration macOS/Windows. Les graphes vivent dans un `QMainWindow` interne (`MainWindow.plot_area`, widget central) pour ne jamais se mélanger aux panneaux latéraux (arbre des séries, plus tard annotations). Chaque `PlotDock` a un `objectName` stable (`plot_N`).
+- **Docks : `QDockWidget`** (pas `pyqtgraph.dockarea`). Raisons : onglets, détachement en fenêtre flottante et fenêtres natives gérés par Qt ; `QMainWindow.saveState/restoreState` pour la géométrie (stockée en base64 dans le layout JSON) ; meilleure intégration macOS/Windows. Les graphes vivent dans un `QMainWindow` interne (`MainWindow.plot_area`, widget central) pour ne jamais se mélanger aux panneaux latéraux (arbre des séries, annotations, mesures). Chaque `PlotDock` a un `objectName` stable (`plot_N`).
 - **Textes UI** : centralisés dans `csvjuggler/i18n.py` (classe `Msg`, accès via `tr()` → `QCoreApplication.translate`).
 - **Glisser-déposer** : type MIME `application/x-csvjuggler-series-ids`, liste d'identifiants séparés par `\n`. Glisser un nœud dataset = toutes ses séries.
 - **Alias de dataset** : nom du fichier sans extension, `/` interdit (remplacé par `_`), suffixe `_2`, `_3`… si doublon. Les noms de colonne peuvent contenir `/` (on coupe au premier `/`).
@@ -271,6 +275,8 @@ Valide chaque phase (démo et tests verts) avant de passer à la suivante. Une p
 - **Chargement d'un layout** : pour chaque dataset du layout, dans l'ordre : fichier de remplacement (`-l` + fichiers en CLI, ou `file_overrides`) → dataset déjà chargé sous le même alias → chemin enregistré → fichier de même nom à côté du layout → (interactif) demande d'un fichier de remplacement. Le fichier est relu avec les `import_settings` du layout et **l'alias du layout** (les identifiants de séries restent valides). Les séries manquantes restent dans la config (elles réapparaissent si un fichier complet est chargé) et sont signalées (barre d'état + boîte d'info en interactif), jamais bloquantes. Les annotations : `reload_companions()` puis fusion de celles du layout (par id, le layout gagne).
 - **Mesure** : calculs purs dans `data/analysis.py` (`value_at`, `interval_stats`, `to_tsv`). `ui/cursors.py` : `Tracker` (un par graphe, activé globalement par T ; la position est propagée aux graphes du même groupe de synchro) et `ABCursors` (par graphe, bouton « Curseurs A/B » ou Ctrl+B ; lignes recopiées dans chaque sous-graphe). Les valeurs sont celles **affichées** (gain/offset appliqués ; en mode XY → point le plus proche). Panneau `ui/measure_panel.py` (dock en bas) pour le graphe courant : Δt, 1/Δt, Y(A), Y(B), ΔY, et statistiques sur [A, B] si les curseurs sont actifs, sinon sur la région d'annotation sélectionnée, sinon sur la plage X visible. « Copier (TSV) » → presse-papiers.
 - **Tests** : ne jamais créer d'annotation sur un CSV de `tests/data/` (fichier compagnon écrit à côté) — copier le CSV dans `tmp_path`. Une fixture autouse de `conftest.py` échoue sinon.
+- **Séries calculées** (`data/derived.py`) : la formule est analysée par `ast` puis validée (liste blanche : nombres, variables, `+ - * / ** %`, comparaisons, constantes `pi`/`e`, fonctions `derivative`, `integral`, `lowpass(a, fc)`, `abs`, `sqrt`, `exp`, `log`, `log10`, `sin`, `cos`, `tan`, `minimum`, `maximum`, `clip`) et évaluée par un interpréteur d'arbre maison — **aucun `eval`**. Les variables sont rééchantillonnées sur le X de la première variable. `lowpass` = 1er ordre causal, calcul vectorisé par blocs (exact à 1e-13 près face à la récurrence). Les séries vivent dans le dataset virtuel réservé `calc` (`calc/<nom>`), recalculées à chaque ajout/rechargement de fichier ; une formule devenue invalide est signalée (`Session.derived_errors`), sans exception. Sauvegardées dans `Layout.derived`.
+- **Export** : PNG d'un graphe = `pyqtgraph.exporters.ImageExporter(scene)` (toute la scène : les ViewBox secondaires sont des items de premier niveau). SVG = `QSvgGenerator(SvgVersion.Svg11)` + `setResolution(widget.logicalDpiX())` — le `SVGExporter` de pyqtgraph 0.14 plante sur les chemins SVG de Qt 6.12, SVG Tiny perd le clipping et 72 dpi décale la mise en page. Fenêtre entière = rendu de la zone des graphes. CSV (`data/export.py`) : valeurs brutes des séries (sans gain/offset), une colonne de temps si X commun, sinon paires temps/valeur ; plage visible, A–B ou région sélectionnée.
 - **QSettings** : `recent_files`, `recent_layouts` (10 max), `last_layout` (dernier layout enregistré/ouvert, rechargé au démarrage sans argument). `MainWindow` reçoit un `QSettings` (fichier ini temporaire dans les tests).
 - **CLI** : `csvjuggler fichier.csv` importe directement ; `csvjuggler fichier.csv -l layout.cjl.json` applique le layout en remplaçant ses fichiers dans l'ordre ; sans argument, restaure le dernier layout.
 - Environnement de dev : `python -m venv .venv && .venv/bin/pip install -e '.[dev]'` ; tests en `QT_QPA_PLATFORM=offscreen` (forcé dans `tests/conftest.py`).
