@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
+import copy
 import itertools
 import logging
 import math
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent, QKeySequence
-from PySide6.QtWidgets import QDockWidget, QFileDialog, QMainWindow, QMessageBox, QWidget
+from PySide6.QtWidgets import (
+    QDockWidget,
+    QFileDialog,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QWidget,
+)
 
 from csvjuggler.data.dataset import Dataset
 from csvjuggler.data.importer import (
@@ -24,6 +32,13 @@ from csvjuggler.data.importer import (
     load_csv,
 )
 from csvjuggler.i18n import Msg, tr
+from csvjuggler.model.layout import (
+    DatasetRef,
+    DockConfig,
+    Layout,
+    LayoutError,
+    with_layout_suffix,
+)
 from csvjuggler.model.plot_config import PlotConfig
 from csvjuggler.model.session import Session
 from csvjuggler.ui.annotation_items import AnnotationManager
@@ -38,6 +53,10 @@ from csvjuggler.ui.x_sync import XSyncManager
 log = logging.getLogger(__name__)
 
 CSV_SUFFIXES = {".csv", ".tsv", ".txt"}
+MAX_RECENT = 10
+KEY_RECENT_FILES = "recent_files"
+KEY_RECENT_LAYOUTS = "recent_layouts"
+KEY_LAST_LAYOUT = "last_layout"
 
 
 def _csv_paths(urls: Iterable) -> list[Path]:
@@ -52,9 +71,16 @@ def _load(
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, session: Session, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        settings: QSettings | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.session = session
+        self.settings = settings if settings is not None else QSettings()
+        self.layout_path: Path | None = None
         self.setWindowTitle(tr(Msg.APP_NAME))
         self.resize(1280, 800)
         self.setAcceptDrops(True)
@@ -77,6 +103,8 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, tree_dock)
 
         self._plot_counter = 0
+        self.layout_extensions: list[Callable[[Layout], None]] = []
+        """Called after a layout is applied (derived series…)."""
         self.plot_docks: list[PlotDock] = []
         self.current_dock: PlotDock | None = None
         self.x_sync = XSyncManager(self)
@@ -117,6 +145,27 @@ class MainWindow(QMainWindow):
         reload_action.setShortcut(QKeySequence("Ctrl+R"))
         reload_action.triggered.connect(self.reload_all)
         file_menu.addAction(reload_action)
+        self.recent_files_menu = file_menu.addMenu(tr(Msg.MENU_RECENT_FILES))
+        self.recent_files_menu.aboutToShow.connect(
+            lambda: self._fill_recent(self.recent_files_menu, KEY_RECENT_FILES)
+        )
+        file_menu.addSeparator()
+        open_layout = QAction(tr(Msg.ACTION_OPEN_LAYOUT), self)
+        open_layout.setShortcut(QKeySequence("Ctrl+L"))
+        open_layout.triggered.connect(self._on_open_layout)
+        file_menu.addAction(open_layout)
+        save_layout = QAction(tr(Msg.ACTION_SAVE_LAYOUT), self)
+        save_layout.setShortcut(QKeySequence.StandardKey.Save)
+        save_layout.triggered.connect(self._on_save_layout)
+        file_menu.addAction(save_layout)
+        save_layout_as = QAction(tr(Msg.ACTION_SAVE_LAYOUT_AS), self)
+        save_layout_as.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        save_layout_as.triggered.connect(self._on_save_layout_as)
+        file_menu.addAction(save_layout_as)
+        self.recent_layouts_menu = file_menu.addMenu(tr(Msg.MENU_RECENT_LAYOUTS))
+        self.recent_layouts_menu.aboutToShow.connect(
+            lambda: self._fill_recent(self.recent_layouts_menu, KEY_RECENT_LAYOUTS)
+        )
         file_menu.addSeparator()
         quit_action = QAction(tr(Msg.ACTION_QUIT), self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
@@ -234,6 +283,7 @@ class MainWindow(QMainWindow):
                 self._import_error(path, exc)
                 continue
             self.session.add_dataset(dataset)
+            self._push_recent(KEY_RECENT_FILES, path)
             self.statusBar().showMessage(
                 tr(Msg.STATUS_LOADED).format(
                     alias=dataset.alias,
@@ -297,6 +347,212 @@ class MainWindow(QMainWindow):
             self, tr(Msg.OPEN_DIALOG_TITLE), "", tr(Msg.OPEN_DIALOG_FILTER)
         )
         self.open_files(paths)
+
+    # -- recent files ---------------------------------------------------------------------
+
+    def recent(self, key: str) -> list[str]:
+        value = self.settings.value(key, [])
+        if isinstance(value, str):  # QSettings returns a str for one-element lists
+            return [value]
+        if isinstance(value, list):
+            return [str(v) for v in value]
+        return []
+
+    def _push_recent(self, key: str, path: str | Path) -> None:
+        path = str(Path(path).resolve())
+        items = [path] + [p for p in self.recent(key) if p != path]
+        self.settings.setValue(key, items[:MAX_RECENT])
+
+    def _fill_recent(self, menu: QMenu, key: str) -> None:
+        menu.clear()
+        items = self.recent(key)
+        if not items:
+            menu.addAction(tr(Msg.RECENT_EMPTY)).setEnabled(False)
+        for path in items:
+            if key == KEY_RECENT_FILES:
+                menu.addAction(path, partial(self.open_files, [path]))
+            else:
+                menu.addAction(path, partial(self.load_layout, path))
+
+    # -- layouts --------------------------------------------------------------------------
+
+    def current_layout(self) -> Layout:
+        """Snapshot of the session: what is on screen is what gets saved."""
+        return Layout(
+            datasets=[
+                DatasetRef(ds.alias, str(ds.path), copy.deepcopy(ds.import_settings))
+                for ds in self.session.datasets
+                if ds.path is not None and ds.import_settings is not None
+            ],
+            docks=[
+                DockConfig(d.dock_id, d.windowTitle(), copy.deepcopy(d.plot.config))
+                for d in self.plot_docks
+            ],
+            dock_state=bytes(self.plot_area.saveState().toBase64().data()).decode("ascii"),
+            window_state=bytes(self.saveState().toBase64().data()).decode("ascii"),
+            annotations=self.session.annotations.all(),
+        )
+
+    def save_layout(self, path: str | Path) -> Path:
+        path = with_layout_suffix(path)
+        self.current_layout().save(path)
+        self.layout_path = path
+        self._push_recent(KEY_RECENT_LAYOUTS, path)
+        self.settings.setValue(KEY_LAST_LAYOUT, str(path.resolve()))
+        self.statusBar().showMessage(tr(Msg.STATUS_LAYOUT_SAVED).format(path=path), 5000)
+        return path
+
+    def load_layout(
+        self,
+        path: str | Path,
+        file_overrides: Iterable[str | Path] = (),
+        interactive: bool = True,
+    ) -> list[str]:
+        """Apply a layout. ``file_overrides`` replace the layout's files, in order.
+
+        Missing files/series never block: they are reported. Returns the missing series ids.
+        """
+        path = Path(path)
+        try:
+            layout = Layout.load(path)
+        except LayoutError as exc:
+            log.error("Cannot load layout %s: %s", path, exc)
+            if interactive:
+                QMessageBox.warning(
+                    self,
+                    tr(Msg.LAYOUT_ERROR_TITLE),
+                    tr(Msg.LAYOUT_ERROR_TEXT).format(path=path, error=exc),
+                )
+            return []
+        overrides = [Path(p) for p in file_overrides]
+        self._load_layout_datasets(layout, path.parent, overrides, interactive)
+        if len(overrides) > len(layout.datasets):
+            self.open_files(overrides[len(layout.datasets) :], interactive=False)
+        self._apply_layout_docks(layout)
+        self.session.reload_companions()
+        self.session.annotations.merge(layout.annotations)
+        for extension in self.layout_extensions:
+            extension(layout)
+
+        self.layout_path = path
+        self._push_recent(KEY_RECENT_LAYOUTS, path)
+        self.settings.setValue(KEY_LAST_LAYOUT, str(path.resolve()))
+        missing = self.session.missing_series(layout.series_ids())
+        if missing:
+            log.warning("Layout %s: missing series %s", path, ", ".join(missing))
+            self.statusBar().showMessage(
+                tr(Msg.STATUS_LAYOUT_MISSING).format(count=len(missing)), 10000
+            )
+            if interactive:
+                QMessageBox.information(
+                    self,
+                    tr(Msg.LAYOUT_MISSING_SERIES_TITLE),
+                    tr(Msg.LAYOUT_MISSING_SERIES_TEXT).format(ids="\n".join(missing)),
+                )
+        else:
+            self.statusBar().showMessage(tr(Msg.STATUS_LAYOUT_LOADED).format(name=path.name), 5000)
+        return missing
+
+    def _load_layout_datasets(
+        self, layout: Layout, layout_dir: Path, overrides: list[Path], interactive: bool
+    ) -> None:
+        for i, ref in enumerate(layout.datasets):
+            source: Path | None
+            if i < len(overrides):
+                source = overrides[i]
+            elif self.session.dataset(ref.alias) is not None:
+                continue  # already loaded under that alias: keep it
+            else:
+                source = next((p for p in ref.candidate_paths(layout_dir) if p.is_file()), None)
+                if source is None and interactive:
+                    source = self._ask_replacement(ref)
+            if source is None:
+                log.warning("Layout dataset %r: file not found (%s)", ref.alias, ref.path)
+                continue
+            try:
+                fresh = run_with_progress(
+                    self,
+                    tr(Msg.PROGRESS_IMPORT).format(name=source.name),
+                    partial(_load, source, copy.deepcopy(ref.import_settings), ref.alias),
+                )
+            except CsvImportCancelled:
+                continue
+            except CsvImportError as exc:
+                if interactive:
+                    self._import_error(source, exc)
+                else:
+                    log.error("Import failed for %s: %s", source, exc)
+                continue
+            if self.session.dataset(ref.alias) is not None:
+                self.session.replace_data(ref.alias, fresh)
+            else:
+                self.session.add_dataset(fresh)
+
+    def _ask_replacement(self, ref: DatasetRef) -> Path | None:
+        answer = QMessageBox.question(
+            self,
+            tr(Msg.LAYOUT_MISSING_FILE_TITLE),
+            tr(Msg.LAYOUT_MISSING_FILE_TEXT).format(alias=ref.alias, path=ref.path),
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return None
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            tr(Msg.LAYOUT_PICK_FILE).format(alias=ref.alias),
+            "",
+            tr(Msg.OPEN_DIALOG_FILTER),
+        )
+        return Path(path) if path else None
+
+    def _apply_layout_docks(self, layout: Layout) -> None:
+        for dock in list(self.plot_docks):
+            dock.close()
+        for dock_cfg in layout.docks:
+            self.new_plot(copy.deepcopy(dock_cfg.plot), dock_cfg.dock_id, dock_cfg.title)
+        if layout.dock_state:
+            self.plot_area.restoreState(QByteArray.fromBase64(layout.dock_state.encode("ascii")))
+        if layout.window_state:
+            self.restoreState(QByteArray.fromBase64(layout.window_state.encode("ascii")))
+        for dock in self.plot_docks:
+            dock.plot.auto_range()
+
+    def _on_open_layout(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr(Msg.LAYOUT_OPEN_TITLE), "", tr(Msg.LAYOUT_FILTER)
+        )
+        if path:
+            self.load_layout(path)
+
+    def _on_save_layout(self) -> None:
+        if self.layout_path is None:
+            self._on_save_layout_as()
+        else:
+            self._save_layout_reporting(self.layout_path)
+
+    def _on_save_layout_as(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr(Msg.LAYOUT_SAVE_TITLE), "", tr(Msg.LAYOUT_FILTER)
+        )
+        if path:
+            self._save_layout_reporting(Path(path))
+
+    def _save_layout_reporting(self, path: Path) -> None:
+        try:
+            self.save_layout(path)
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                tr(Msg.LAYOUT_ERROR_TITLE),
+                tr(Msg.LAYOUT_SAVE_ERROR_TEXT).format(path=path, error=exc),
+            )
+
+    def restore_last_layout(self) -> bool:
+        """Startup: reload the last saved/opened layout, without dialogs."""
+        last = self.settings.value(KEY_LAST_LAYOUT, "")
+        if last and Path(str(last)).is_file():
+            self.load_layout(str(last), interactive=False)
+            return True
+        return False
 
     # -- drop of CSV files on the window --------------------------------------------------
 

@@ -77,6 +77,15 @@ class Session(QObject):
             log.info("Loaded %d annotation(s) for %s", len(annotations), dataset.alias)
         self.annotations.merge(annotations)
 
+    def reload_companions(self) -> None:
+        """Forget all annotations and read the companion files of the loaded datasets."""
+        self.annotations.clear()
+        for dataset in self._datasets.values():
+            self._load_companion(dataset)
+
+    def missing_series(self, series_ids: set[str]) -> list[str]:
+        return sorted(sid for sid in series_ids if self.get_series(sid) is None)
+
     def save_companions(self) -> None:
         """Write ``<csv>.annotations.json`` for every dataset that has (or had) annotations."""
         for dataset in self._datasets.values():
@@ -115,6 +124,7 @@ class Session(QObject):
         dataset = self._datasets[alias]
         names_before = list(dataset.series)
         dataset.series = fresh.series
+        dataset.path = fresh.path
         dataset.import_settings = fresh.import_settings
         dataset.time_label = fresh.time_label
         for s in dataset.series.values():

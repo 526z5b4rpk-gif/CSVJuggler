@@ -20,7 +20,11 @@ log = logging.getLogger("csvjuggler")
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="csvjuggler", description="Visualiseur de CSV")
     parser.add_argument("files", nargs="*", help="fichiers CSV à ouvrir")
-    parser.add_argument("-l", "--layout", help="layout à charger (*.cjl.json)")
+    parser.add_argument(
+        "-l",
+        "--layout",
+        help="layout à charger (*.cjl.json) ; les fichiers donnés remplacent ceux du layout",
+    )
     parser.add_argument("--debug", action="store_true", help="journalisation détaillée")
     return parser.parse_args(argv)
 
@@ -39,10 +43,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     session = Session()
     window = MainWindow(session)
     window.show()
-    if args.files:
-        window.open_files(args.files, interactive=False)
     if args.layout:
-        log.warning("Layout loading is not implemented yet (phase 7): %s", args.layout)
+        window.load_layout(args.layout, file_overrides=args.files, interactive=False)
+    elif args.files:
+        window.open_files(args.files, interactive=False)
+    else:
+        window.restore_last_layout()
     return app.exec()
 
 
