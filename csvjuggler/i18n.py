@@ -296,6 +296,16 @@ class Msg:
     EXPORT_ERROR_TITLE = "Erreur d'export"
     EXPORT_NO_PLOT = "Aucun graphe actif."
 
+    # X playback bar
+    TOOLBAR_SLIDER = "Lecture X"
+    SLIDER_LABEL = "X :"
+    SLIDER_SHOW = "Curseur"
+    SLIDER_SHOW_TIP = "Afficher le curseur de lecture sur tous les graphes"
+    SLIDER_PLAY_TIP = "Lecture / pause"
+    SLIDER_SPEED_TIP = "Vitesse de lecture (unités de X par seconde)"
+    SLIDER_FOLLOW = "Suivre"
+    SLIDER_FOLLOW_TIP = "Faire défiler les graphes pour garder le curseur visible"
+
     # Status bar
     STATUS_LOADED = "« {alias} » chargé : {count} séries, {points} points"
     STATUS_MISSING_SERIES = "Série introuvable : {series_id}"

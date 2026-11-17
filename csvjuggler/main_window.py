@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QToolBar,
     QWidget,
 )
 
@@ -65,6 +66,7 @@ from csvjuggler.ui.measure_panel import MeasurePanel
 from csvjuggler.ui.plot_dock import PlotDock
 from csvjuggler.ui.progress import run_with_progress
 from csvjuggler.ui.series_tree import SeriesTree
+from csvjuggler.ui.time_slider import TimeSliderBar
 from csvjuggler.ui.x_sync import XSyncManager
 
 log = logging.getLogger(__name__)
@@ -173,6 +175,17 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.measure_dock)
         self.tracker_enabled = False
         self.tracker_mode = "linear"
+
+        self.time_bar = TimeSliderBar()
+        self.time_toolbar = QToolBar(tr(Msg.TOOLBAR_SLIDER), self)
+        self.time_toolbar.setObjectName("time_toolbar")
+        self.time_toolbar.setMovable(False)
+        self.time_toolbar.addWidget(self.time_bar)
+        self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.time_toolbar)
+        self.time_bar.position_changed.connect(self._on_playhead_moved)
+        self.time_bar.visibility_changed.connect(self._on_playhead_visibility)
+        session.datasets_changed.connect(self._update_time_range)
+        session.series_data_changed.connect(self._update_time_range)
         self._build_menus()
         session.series_data_changed.connect(self._on_series_data_changed)
         session.series_names_changed.connect(self._refresh_all_plots)
@@ -229,6 +242,7 @@ class MainWindow(QMainWindow):
         window_menu.addSeparator()
         for dock in (self.annotation_dock, self.measure_dock):
             window_menu.addAction(dock.toggleViewAction())
+        window_menu.addAction(self.time_toolbar.toggleViewAction())
 
         measure_menu = self.menuBar().addMenu(tr(Msg.MENU_MEASURE))
         self.tracker_action = QAction(tr(Msg.ACTION_TRACKER), self)
@@ -300,6 +314,9 @@ class MainWindow(QMainWindow):
         dock.tracker.set_mode(self.tracker_mode)  # type: ignore[arg-type]
         dock.tracker.set_enabled(self.tracker_enabled)
         dock.tracker.moved.connect(lambda x, d=dock: self._on_tracker_moved(d, x))
+        dock.playhead.set_mode(self.tracker_mode)  # type: ignore[arg-type]
+        dock.playhead.x = self.time_bar.position
+        dock.playhead.set_enabled(self.time_bar.cursor_visible)
         self._set_current(dock)
         return dock
 
@@ -316,6 +333,7 @@ class MainWindow(QMainWindow):
         self.tracker_mode = mode
         for dock in self.plot_docks:
             dock.tracker.set_mode(mode)  # type: ignore[arg-type]
+            dock.playhead.set_mode(mode)  # type: ignore[arg-type]
 
     def _on_tracker_moved(self, source: PlotDock, x: float) -> None:
         """The tracker follows the mouse on the synchronised graphs too."""
@@ -323,6 +341,26 @@ class MainWindow(QMainWindow):
         for dock in self.plot_docks:
             if id(dock.plot) in peers:
                 dock.tracker.set_x(x)
+
+    def _update_time_range(self, *_args: object) -> None:
+        self.time_bar.set_range(self.session.x_extent())
+
+    def _on_playhead_visibility(self, visible: bool) -> None:
+        for dock in self.plot_docks:
+            dock.playhead.x = self.time_bar.position
+            dock.playhead.set_enabled(visible)
+
+    def _on_playhead_moved(self, x: float) -> None:
+        """The « Lecture X » bar moved: cursor on every graph, views follow if asked."""
+        for dock in self.plot_docks:
+            dock.playhead.set_x(x)
+        if not self.time_bar.follow:
+            return
+        for dock in self.plot_docks:
+            lo, hi = dock.plot.x_range()  # may already have moved through the X sync
+            if not lo <= x <= hi:
+                width = hi - lo
+                dock.plot.subplots[0].view_box.setXRange(x - width / 2, x + width / 2, padding=0)
 
     def toggle_current_cursors(self) -> None:
         if self.current_dock is not None:

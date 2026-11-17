@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from csvjuggler.data.dataset import Dataset
@@ -235,6 +237,16 @@ class Session(QObject):
             else:
                 dataset.import_settings.renames[series.name] = display_name
         self.series_names_changed.emit()
+
+    def x_extent(self) -> tuple[float, float] | None:
+        """Smallest and largest X over every series (``None`` when nothing is loaded)."""
+        lo, hi = math.inf, -math.inf
+        for dataset in self._datasets.values():
+            for series in dataset.series.values():
+                if len(series.x):
+                    lo = min(lo, float(np.nanmin(series.x)))
+                    hi = max(hi, float(np.nanmax(series.x)))
+        return (lo, hi) if lo < hi else None
 
     def get_series(self, series_id: str) -> Series | None:
         try:

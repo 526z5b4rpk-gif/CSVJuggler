@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QDockWidget, QInputDialog, QToolBar, QVBoxLayout, 
 from csvjuggler.i18n import Msg, tr
 from csvjuggler.model.plot_config import PlotConfig
 from csvjuggler.model.session import Session
-from csvjuggler.ui.cursors import ABCursors, Tracker
+from csvjuggler.ui.cursors import PLAYHEAD_PEN, ABCursors, Tracker, ValueCursor
 from csvjuggler.ui.plot_menus import PlotController
 from csvjuggler.ui.plot_widget import PlotWidget
 
@@ -41,6 +41,8 @@ class PlotDock(QDockWidget):
         self.plot = PlotWidget(session, config)
         self.controller = PlotController(self.plot, self)
         self.tracker = Tracker(self.plot)
+        self.playhead = ValueCursor(self.plot, PLAYHEAD_PEN, label_at_bottom=True, z=61)
+        """Cursor driven by the « Lecture X » bar."""
         self.cursors = ABCursors(self.plot)
 
         self.toolbar = QToolBar(self)

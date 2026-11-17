@@ -53,7 +53,8 @@ csvjuggler/
 │   ├── x_sync.py          # Synchronisation X entre graphes (groupes)
 │   ├── progress.py        # Tâche en QThread + barre de progression
 │   ├── multi_axis.py      # Gestion des axes Y secondaires (ViewBox liées)
-│   ├── cursors.py         # Curseurs de mesure et tracker
+│   ├── cursors.py         # Curseurs de mesure (ValueCursor, tracker, A/B)
+│   ├── time_slider.py     # Barre « Lecture X » (curseur, lecture/pause)
 │   ├── annotation_panel.py# Panneau latéral listant les annotations
 │   ├── measure_panel.py   # Panneau « Mesures » (curseurs A/B, statistiques, TSV)
 │   ├── annotation_items.py# Items graphiques d'annotation (éditables, déplaçables)
@@ -254,6 +255,7 @@ Valide chaque phase (démo et tests verts) avant de passer à la suivante. Une p
 - **Sous-graphes** : `PlotWidget` est un `pg.GraphicsLayoutWidget` ; chaque sous-graphe (`SubPlot`) est un `PlotItem` dont l'axe X est lié (`setXLink`) au premier. Seul le dernier affiche les graduations X. `PlotConfig.subplots: list[SubplotConfig]` porte les courbes et le ratio.
 - **Synchro X** : `ui/x_sync.py` (`XSyncManager`). `PlotConfig.sync_group` = `"global"` par défaut, `""` = non synchronisé, tout autre nom = groupe nommé. `PlotWidget.set_x_range` n'émet pas `x_range_changed` (pas de boucle).
 - **Division de la zone** : « Diviser ↔ » / « Diviser ↕ » (barre d'outils du graphe et menu contextuel) crée un nouveau graphe à droite / en dessous du graphe courant (`MainWindow.split_plot`, `splitDockWidget`), dans le **même groupe de synchro X** et sur la même plage X. Si le graphe source n'était pas synchronisé, les deux rejoignent un nouveau groupe nommé « groupe N » (les autres graphes ne sont pas affectés). « + Sous-graphe » / « - Sous-graphe » gèrent les sous-graphes empilés d'un même graphe.
+- **Barre « Lecture X »** (`ui/time_slider.py`, barre d'outils en bas, masquable via Fenêtre) : curseur sur l'étendue X de toutes les séries (`Session.x_extent()`), champ numérique, lecture/pause (vitesse x0.1 à x50 en unités de X par seconde, arrêt en fin de données) et « Suivre » (les graphes défilent pour garder le curseur visible). Elle pilote un `ValueCursor` par graphe (`PlotDock.playhead`, ligne orange, étiquette en bas) affiché sur **tous** les graphes, synchronisés ou non. `ValueCursor` est la base commune du tracker (`Tracker` = `ValueCursor` qui suit la souris, étiquette en haut). L'état de lecture n'est pas sauvegardé dans le layout.
 - **Panneau Mesures** : se rafraîchit sur `sigXRangeChanged` de la ViewBox (qui couvre aussi les changements imposés par la synchro), avec un délai de 80 ms ; curseurs, config et sélection d'annotation → rafraîchissement immédiat.
 - **Grille** : les axes pyqtgraph dessinent la grille au-dessus des courbes ; on leur donne `zValue = -1000`.
 - **Fermeture d'un dock** = destruction (pas seulement masquage) ; « Tout fermer » laisse la zone vide, « Nouveau graphe » (Ctrl+N) en recrée un.
