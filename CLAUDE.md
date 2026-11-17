@@ -45,6 +45,9 @@ csvjuggler/
 │   ├── series_tree.py     # Arbre des séries (QTreeView), filtre, drag source
 │   ├── plot_dock.py       # Un dock = un PlotWidget + barre d'outils locale
 │   ├── plot_widget.py     # Wrapper pyqtgraph : courbes, axes multiples, annotations
+│   ├── plot_items.py      # ViewBox et AxisItem personnalisés (menus, format des graduations)
+│   ├── plot_menus.py      # Menus contextuels + ouverture des dialogues d'un graphe
+│   ├── widgets.py         # Petits widgets réutilisables (ColorButton)
 │   ├── x_sync.py          # Synchronisation X entre graphes (groupes)
 │   ├── progress.py        # Tâche en QThread + barre de progression
 │   ├── multi_axis.py      # Gestion des axes Y secondaires (ViewBox liées)
@@ -227,7 +230,7 @@ Valide chaque phase (démo et tests verts) avant de passer à la suivante. Une p
 - [x] Phase 1 — Squelette (18 tests verts ; smoke test : 10 M points, pire frame pan/zoom ≈ 46 ms en offscreen)
 - [x] Phase 2 — Multi-fenêtres (docks, sous-graphes, synchro X par groupe, légende cliquable, mosaïque)
 - [x] Phase 3 — Import avancé (dialogue, Scope multi-en-têtes, paires temps/valeur, unités, date/heure, alias, renommage, Ctrl+R, QThread)
-- [ ] Phase 4 — Personnalisation
+- [x] Phase 4 — Personnalisation (PlotConfig/AxisConfig/CurveConfig, dialogues, menus contextuels, double-clics)
 - [ ] Phase 5 — Axes secondaires
 - [ ] Phase 6 — Annotations
 - [ ] Phase 7 — Layouts
@@ -252,5 +255,8 @@ Valide chaque phase (démo et tests verts) avant de passer à la suivante. Une p
 - **Dialogue d'import** : affiché pour Ctrl+O et le glisser-déposer de fichiers ; la CLI importe directement avec la détection automatique.
 - **Renommage** : alias d'affichage `Series.display_name`, édité dans l'arbre (double-clic/F2), mémorisé dans `ImportSettings.renames` (donc dans le layout). L'alias de dataset n'est modifiable qu'à l'import (il fait partie des identifiants de séries).
 - **Rechargement** (Ctrl+R) : `Session.replace_data` remplace les séries et émet `series_data_changed` ; les graphes font `setData` sur les items existants.
+- **Personnalisation** : `ui/plot_items.py` fournit `PlotViewBox` (clic droit / double-clic remontés en signaux, menu pyqtgraph remplacé), `FormattedAxis` (format des graduations : décimales, scientifique, préfixes SI ; clic droit / double-clic) et `DateAxis` (axe X absolu, secondes epoch, `utcOffset=0`). `ui/plot_menus.py` (`PlotController`) transforme ces demandes en menus/dialogues ; les phases suivantes ajoutent leurs entrées via `menu_extensions` / `curve_menu_extensions`. Couleur : `ui/widgets.py` (`ColorButton`).
+- **Plages d'axes** : `apply_config` ne retouche la plage d'un axe que si `(auto_range, min, max, log, inverted)` a changé ; un changement de style conserve donc le zoom de l'utilisateur. « Auto une fois » = ajuster puis mémoriser en plage manuelle.
+- **Données affichées** : `setData` seulement si la série, le gain/offset, le mode ou la série X (mode XY) ont changé. Mode escalier = `stepMode="left"` (maintien). Mode XY : la série X est interpolée sur le vecteur X de chaque courbe si besoin.
 - L'option `-l` est acceptée mais seulement journalisée jusqu'à la phase 7.
 - Environnement de dev : `python -m venv .venv && .venv/bin/pip install -e '.[dev]'` ; tests en `QT_QPA_PLATFORM=offscreen` (forcé dans `tests/conftest.py`).
