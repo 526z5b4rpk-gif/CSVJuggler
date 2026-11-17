@@ -15,6 +15,12 @@ from csvjuggler.data.importer import (
     load_csv,
 )
 from csvjuggler.data.series import Series, split_series_id
+from csvjuggler.model.annotation import (
+    AnnotationStore,
+    companion_path,
+    load_companion,
+    save_companion,
+)
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +38,7 @@ class Session(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._datasets: dict[str, Dataset] = {}
+        self.annotations = AnnotationStore(self)
 
     # -- datasets -------------------------------------------------------------------------
 
@@ -55,7 +62,33 @@ class Session(QObject):
             dataset.rename(self.unique_alias(dataset.alias))
         self._datasets[dataset.alias] = dataset
         self.datasets_changed.emit()
+        self._load_companion(dataset)
         return dataset
+
+    # -- annotation companion files -------------------------------------------------------
+
+    def _load_companion(self, dataset: Dataset) -> None:
+        if dataset.path is None:
+            return
+        annotations = load_companion(dataset.path)
+        for a in annotations:
+            a.dataset_alias, a.dataset_path = dataset.alias, str(dataset.path)
+        if annotations:
+            log.info("Loaded %d annotation(s) for %s", len(annotations), dataset.alias)
+        self.annotations.merge(annotations)
+
+    def save_companions(self) -> None:
+        """Write ``<csv>.annotations.json`` for every dataset that has (or had) annotations."""
+        for dataset in self._datasets.values():
+            if dataset.path is None:
+                continue
+            annotations = self.annotations.for_dataset(dataset.alias)
+            if not annotations and not companion_path(dataset.path).exists():
+                continue
+            try:
+                save_companion(dataset.path, annotations)
+            except OSError as exc:
+                log.warning("Cannot write annotations next to %s: %s", dataset.path, exc)
 
     def load_csv(
         self,

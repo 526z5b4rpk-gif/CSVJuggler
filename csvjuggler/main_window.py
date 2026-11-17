@@ -9,7 +9,7 @@ from collections.abc import Iterable
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent, QKeySequence
 from PySide6.QtWidgets import QDockWidget, QFileDialog, QMainWindow, QMessageBox, QWidget
 
@@ -26,6 +26,9 @@ from csvjuggler.data.importer import (
 from csvjuggler.i18n import Msg, tr
 from csvjuggler.model.plot_config import PlotConfig
 from csvjuggler.model.session import Session
+from csvjuggler.ui.annotation_items import AnnotationManager
+from csvjuggler.ui.annotation_panel import AnnotationPanel
+from csvjuggler.ui.dialogs.annotation_dialog import edit_annotation
 from csvjuggler.ui.dialogs.import_dialog import ImportDialog
 from csvjuggler.ui.plot_dock import PlotDock
 from csvjuggler.ui.progress import run_with_progress
@@ -77,6 +80,25 @@ class MainWindow(QMainWindow):
         self.plot_docks: list[PlotDock] = []
         self.current_dock: PlotDock | None = None
         self.x_sync = XSyncManager(self)
+
+        self.annotations = AnnotationManager(
+            session,
+            lambda: [(d.dock_id, d.plot) for d in self.plot_docks],
+            self,
+            edit_dialog=edit_annotation,
+        )
+        self.annotations.focus_requested.connect(self._raise_dock)
+        self.annotation_panel = AnnotationPanel(self.annotations)
+        self.annotation_dock = QDockWidget(tr(Msg.DOCK_ANNOTATIONS), self)
+        self.annotation_dock.setObjectName("annotation_dock")
+        self.annotation_dock.setWidget(self.annotation_panel)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.annotation_dock)
+        # Companion files are written shortly after the last change.
+        self._companion_timer = QTimer(self)
+        self._companion_timer.setSingleShot(True)
+        self._companion_timer.setInterval(500)
+        self._companion_timer.timeout.connect(session.save_companions)
+        session.annotations.annotations_changed.connect(self._companion_timer.start)
         self._build_menus()
         session.series_data_changed.connect(self._on_series_data_changed)
         session.series_names_changed.connect(self._refresh_all_plots)
@@ -129,13 +151,22 @@ class MainWindow(QMainWindow):
         dock.plot.activated.connect(lambda d=dock: self._set_current(d))
         dock.closed.connect(self._on_dock_closed)
         self.x_sync.register(dock.plot)
+        dock.controller.menu_extensions.append(self.annotations.menu_extension(dock.dock_id))
         if self.plot_docks:
             self.plot_area.splitDockWidget(self.plot_docks[-1], dock, Qt.Orientation.Vertical)
         else:
             self.plot_area.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, dock)
         self.plot_docks.append(dock)
+        self.annotations.register_plot(dock.plot)
         self._set_current(dock)
         return dock
+
+    def _raise_dock(self, dock_id: str) -> None:
+        for dock in self.plot_docks:
+            if dock.dock_id == dock_id:
+                dock.show()
+                dock.raise_()
+                self._set_current(dock)
 
     def _set_current(self, dock: PlotDock) -> None:
         self.current_dock = dock
@@ -144,6 +175,7 @@ class MainWindow(QMainWindow):
         if dock in self.plot_docks:
             self.plot_docks.remove(dock)
         self.x_sync.unregister(dock.plot)
+        self.annotations.unregister_plot(dock.plot)
         if self.current_dock is dock:
             self.current_dock = self.plot_docks[-1] if self.plot_docks else None
         self.plot_area.removeDockWidget(dock)
@@ -282,4 +314,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         log.debug("Main window closing")
+        if self._companion_timer.isActive():
+            self._companion_timer.stop()
+            self.session.save_companions()
         super().closeEvent(event)

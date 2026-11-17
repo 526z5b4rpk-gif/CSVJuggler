@@ -52,6 +52,7 @@ csvjuggler/
 │   ├── progress.py        # Tâche en QThread + barre de progression
 │   ├── multi_axis.py      # Gestion des axes Y secondaires (ViewBox liées)
 │   ├── cursors.py         # Curseurs de mesure et tracker
+│   ├── annotation_panel.py# Panneau latéral listant les annotations
 │   ├── annotation_items.py# Items graphiques d'annotation (éditables, déplaçables)
 │   └── dialogs/
 │       ├── import_dialog.py
@@ -232,7 +233,7 @@ Valide chaque phase (démo et tests verts) avant de passer à la suivante. Une p
 - [x] Phase 3 — Import avancé (dialogue, Scope multi-en-têtes, paires temps/valeur, unités, date/heure, alias, renommage, Ctrl+R, QThread)
 - [x] Phase 4 — Personnalisation (PlotConfig/AxisConfig/CurveConfig, dialogues, menus contextuels, double-clics)
 - [x] Phase 5 — Axes secondaires (ViewBox liées, molette par axe, déplacement de courbe, dépôt sur la marge droite, suppression auto)
-- [ ] Phase 6 — Annotations
+- [x] Phase 6 — Annotations (4 types, déplacement, édition, Suppr, panneau, lignes liées, fichier compagnon)
 - [ ] Phase 7 — Layouts
 - [ ] Phase 8 — Mesure
 - [ ] Phase 9 — Séries calculées et export
@@ -262,5 +263,8 @@ Valide chaque phase (démo et tests verts) avant de passer à la suivante. Une p
 - **Axe sans courbe** : `SubplotConfig.prune_axes()` est appelé à chaque `_commit` (l'axe principal est toujours conservé).
 - **Piège pyqtgraph** : désactiver `clipToView` pendant qu'un item change de ViewBox (`_move_to_view`, `MultiAxis._remove`), sinon exception (même cause que pour `addItem`).
 - **Dépôt sur la marge droite** : à moins de 40 px du bord droit de la zone de tracé, ou au-delà (zone des axes secondaires) → nouvel axe.
+- **Annotations** : `AnnotationStore` (dans `Session.annotations`) est la seule source de vérité ; il stocke et renvoie des **copies** (toute modification passe par `update`, qui émet le signal). `ui/annotation_items.py` : `AnnotationManager` (placement + opérations), `AnnotationLayer` (items d'un graphe, reconstruits quand l'annotation change), items pyqtgraph sous-classés pour les clics (droit = menu, double = édition). Placement : graphe/sous-graphe d'origine (`plot_id` = id de dock) ; ligne verticale `link_all` → tous les sous-graphes des graphes du même groupe de synchro ; si le graphe d'origine n'existe pas (fichier compagnon rouvert seul) → premier sous-graphe de chaque graphe montrant une série du dataset. Annotations ajoutées avec `ignoreBounds=True` (n'influencent pas l'auto-range).
+- **Fichier compagnon** : `<nom complet du CSV>.annotations.json` (ex. `essai.csv.annotations.json`), écrit 500 ms après la dernière modification (et à la fermeture), écriture atomique (fichier `.tmp` + `replace`). Créé seulement si le dataset a des annotations (ou mis à jour s'il existe déjà). Rechargé dans `Session.add_dataset` ; l'alias et le chemin sont réécrits avec ceux du dataset courant.
+- **Panneau d'annotations** : `ui/annotation_panel.py`, dock à gauche sous l'arbre des séries ; clic = centrer la vue (largeur de zoom conservée), double-clic = éditer, Suppr = supprimer.
 - L'option `-l` est acceptée mais seulement journalisée jusqu'à la phase 7.
 - Environnement de dev : `python -m venv .venv && .venv/bin/pip install -e '.[dev]'` ; tests en `QT_QPA_PLATFORM=offscreen` (forcé dans `tests/conftest.py`).

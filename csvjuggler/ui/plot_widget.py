@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QMouseEvent
+from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QWidget
 
 from csvjuggler.data.series import Series
@@ -398,7 +398,10 @@ class PlotWidget(pg.GraphicsLayoutWidget):
         self.subplots: list[SubPlot] = []
         self._applying = False
         self._syncing_x = False
+        self.annotation_layer: Any = None
+        """Set by the annotation manager (``ui.annotation_items.AnnotationLayer``)."""
         self.setAcceptDrops(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.apply_config(config or PlotConfig())
 
     # -- config ---------------------------------------------------------------------------
@@ -651,6 +654,16 @@ class PlotWidget(pg.GraphicsLayoutWidget):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         self.activated.emit()
         super().mousePressEvent(event)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if (
+            event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace)
+            and self.annotation_layer is not None
+            and self.annotation_layer.delete_selected()
+        ):
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     @staticmethod
     def _accept_series_drag(event: QDragMoveEvent) -> None:
