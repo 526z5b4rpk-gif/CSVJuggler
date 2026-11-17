@@ -34,10 +34,25 @@ class SeriesModel(QStandardItemModel):
     def __init__(self, session: Session, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._session = session
+        self._rebuilding = False
         session.datasets_changed.connect(self.rebuild)
+        session.series_names_changed.connect(self.rebuild)
+        self.itemChanged.connect(self._on_item_changed)
         self.rebuild()
 
     def rebuild(self) -> None:
+        self._rebuilding = True
+        try:
+            self._rebuild()
+        finally:
+            self._rebuilding = False
+
+    def _on_item_changed(self, item: QStandardItem) -> None:
+        series_id = item.data(SERIES_ID_ROLE)
+        if not self._rebuilding and series_id:
+            self._session.rename_series(series_id, item.text())
+
+    def _rebuild(self) -> None:
         self.clear()
         root = self.invisibleRootItem()
         for dataset in self._session.datasets:
@@ -46,8 +61,7 @@ class SeriesModel(QStandardItemModel):
             if dataset.path is not None:
                 ds_item.setToolTip(str(dataset.path))
             for series in dataset.series.values():
-                item = QStandardItem(series.label)
-                item.setEditable(False)
+                item = QStandardItem(series.label)  # editable: rename (display alias)
                 item.setData(series.id, SERIES_ID_ROLE)
                 unit = f" [{series.unit}]" if series.unit else ""
                 item.setToolTip(f"{series.id}{unit} — {len(series)} pts")

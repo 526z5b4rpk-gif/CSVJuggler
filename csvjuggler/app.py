@@ -40,7 +40,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     window = MainWindow(session)
     window.show()
     if args.files:
-        window.open_files(args.files)
+        window.open_files(args.files, interactive=False)
     if args.layout:
         log.warning("Layout loading is not implemented yet (phase 7): %s", args.layout)
     return app.exec()

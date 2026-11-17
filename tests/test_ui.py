@@ -101,7 +101,10 @@ def test_missing_series_reported(qtbot) -> None:
     assert blocker.args == [["ghost/x"]]
 
 
-def test_main_window_csv_file_drop(qtbot, data_dir: Path) -> None:
+def test_main_window_csv_file_drop(qtbot, data_dir: Path, monkeypatch) -> None:
+    from csvjuggler.ui.dialogs.import_dialog import ImportDialog
+
+    monkeypatch.setattr(ImportDialog, "exec", lambda self: ImportDialog.DialogCode.Accepted)
     session = Session()
     window = MainWindow(session)
     qtbot.addWidget(window)

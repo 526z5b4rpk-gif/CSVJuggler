@@ -1,0 +1,17 @@
+Name;ScopeProjet;;
+File;C:\TwinCAT\Scope\essai.tcscopex;;
+StartTime;133475000000000000;;
+EndTime;133475000100000000;;
+;;;
+Name;MAIN.fVitesse;;MAIN.nCourant
+SymbolName;MAIN.fVitesse;;MAIN.nCourant
+DataType;REAL64;;INT
+SampleTime[ms];1;;2
+Unit;mm/s;;mA
+;;;
+0;0,0;0;100
+1;1,5;2;110
+2;3,0;4;120
+3;4,5;6;130
+4;6,0;;
+5;7,5;;

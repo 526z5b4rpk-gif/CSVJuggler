@@ -6,17 +6,29 @@ import itertools
 import logging
 import math
 from collections.abc import Iterable
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent, QKeySequence
 from PySide6.QtWidgets import QDockWidget, QFileDialog, QMainWindow, QMessageBox, QWidget
 
-from csvjuggler.data.importer import CsvImportError
+from csvjuggler.data.dataset import Dataset
+from csvjuggler.data.importer import (
+    CsvImportCancelled,
+    CsvImportError,
+    ImportSettings,
+    ProgressCallback,
+    analyze,
+    default_alias,
+    load_csv,
+)
 from csvjuggler.i18n import Msg, tr
 from csvjuggler.model.plot_config import PlotConfig
 from csvjuggler.model.session import Session
+from csvjuggler.ui.dialogs.import_dialog import ImportDialog
 from csvjuggler.ui.plot_dock import PlotDock
+from csvjuggler.ui.progress import run_with_progress
 from csvjuggler.ui.series_tree import SeriesTree
 from csvjuggler.ui.x_sync import XSyncManager
 
@@ -28,6 +40,12 @@ CSV_SUFFIXES = {".csv", ".tsv", ".txt"}
 def _csv_paths(urls: Iterable) -> list[Path]:
     paths = [Path(u.toLocalFile()) for u in urls if u.isLocalFile()]
     return [p for p in paths if p.suffix.lower() in CSV_SUFFIXES]
+
+
+def _load(
+    path: Path, settings: ImportSettings | None, alias: str, report: ProgressCallback
+) -> Dataset:
+    return load_csv(path, settings, alias, report)
 
 
 class MainWindow(QMainWindow):
@@ -60,6 +78,9 @@ class MainWindow(QMainWindow):
         self.current_dock: PlotDock | None = None
         self.x_sync = XSyncManager(self)
         self._build_menus()
+        session.series_data_changed.connect(self._on_series_data_changed)
+        session.series_names_changed.connect(self._refresh_all_plots)
+        session.datasets_changed.connect(self._refresh_all_plots)
         self.new_plot()
 
     # -- menus ----------------------------------------------------------------------------
@@ -70,6 +91,10 @@ class MainWindow(QMainWindow):
         open_action.setShortcut(QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self._on_open)
         file_menu.addAction(open_action)
+        reload_action = QAction(tr(Msg.ACTION_RELOAD), self)
+        reload_action.setShortcut(QKeySequence("Ctrl+R"))
+        reload_action.triggered.connect(self.reload_all)
+        file_menu.addAction(reload_action)
         file_menu.addSeparator()
         quit_action = QAction(tr(Msg.ACTION_QUIT), self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
@@ -156,18 +181,27 @@ class MainWindow(QMainWindow):
 
     # -- import ---------------------------------------------------------------------------
 
-    def open_files(self, paths: Iterable[str | Path]) -> None:
+    def open_files(self, paths: Iterable[str | Path], interactive: bool = True) -> None:
+        """Import CSV files. ``interactive`` shows the import dialog for each file."""
         for path in paths:
+            path = Path(path)
             try:
-                dataset = self.session.load_csv(path)
-            except CsvImportError as exc:
-                log.error("Import failed for %s: %s", path, exc)
-                QMessageBox.warning(
+                request = self._import_request(path, interactive)
+                if request is None:
+                    continue
+                settings, alias = request
+                alias = self.session.unique_alias(alias)
+                dataset = run_with_progress(
                     self,
-                    tr(Msg.IMPORT_ERROR_TITLE),
-                    tr(Msg.IMPORT_ERROR_TEXT).format(path=path, error=exc),
+                    tr(Msg.PROGRESS_IMPORT).format(name=path.name),
+                    partial(_load, path, settings, alias),
                 )
+            except CsvImportCancelled:
                 continue
+            except CsvImportError as exc:
+                self._import_error(path, exc)
+                continue
+            self.session.add_dataset(dataset)
             self.statusBar().showMessage(
                 tr(Msg.STATUS_LOADED).format(
                     alias=dataset.alias,
@@ -176,6 +210,55 @@ class MainWindow(QMainWindow):
                 ),
                 5000,
             )
+
+    def _import_request(
+        self, path: Path, interactive: bool
+    ) -> tuple[ImportSettings | None, str] | None:
+        """Settings and alias for ``path``; ``None`` if the user cancelled the dialog."""
+        if not interactive:
+            return None, default_alias(path)
+        preview = analyze(path)
+        dialog = ImportDialog(path, default_alias(path), preview, self)
+        if dialog.exec() != ImportDialog.DialogCode.Accepted:
+            return None
+        return dialog.settings(), dialog.alias() or default_alias(path)
+
+    def _import_error(self, path: Path, exc: Exception) -> None:
+        log.error("Import failed for %s: %s", path, exc)
+        QMessageBox.warning(
+            self,
+            tr(Msg.IMPORT_ERROR_TITLE),
+            tr(Msg.IMPORT_ERROR_TEXT).format(path=path, error=exc),
+        )
+
+    def reload_all(self) -> None:
+        """Re-read every file with its import settings; graphs are kept."""
+        count = 0
+        for dataset in self.session.datasets:
+            if dataset.path is None:
+                continue
+            try:
+                fresh = run_with_progress(
+                    self,
+                    tr(Msg.PROGRESS_RELOAD).format(name=dataset.path.name),
+                    partial(_load, dataset.path, dataset.import_settings, dataset.alias),
+                )
+            except CsvImportCancelled:
+                continue
+            except CsvImportError as exc:
+                self._import_error(dataset.path, exc)
+                continue
+            self.session.replace_data(dataset.alias, fresh)
+            count += 1
+        self.statusBar().showMessage(tr(Msg.STATUS_RELOADED).format(count=count), 5000)
+
+    def _on_series_data_changed(self, _alias: str) -> None:
+        for dock in self.plot_docks:
+            dock.plot.refresh_data()
+
+    def _refresh_all_plots(self) -> None:
+        for dock in self.plot_docks:
+            dock.plot.apply_config(dock.plot.config)
 
     def _on_open(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
