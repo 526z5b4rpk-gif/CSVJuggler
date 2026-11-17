@@ -14,7 +14,14 @@ from typing import Any
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QKeyEvent, QMouseEvent
+from PySide6.QtGui import (
+    QDragEnterEvent,
+    QDragLeaveEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QKeyEvent,
+    QMouseEvent,
+)
 from PySide6.QtWidgets import QWidget
 
 from csvjuggler.data.series import Series
@@ -679,6 +686,11 @@ class PlotWidget(pg.GraphicsLayoutWidget):
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         self._accept_series_drag(event)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        # Enter/move are handled here without QGraphicsView, so the leave must be too
+        # (otherwise Qt warns "drag leave received before drag enter").
+        event.accept()
 
     def dropEvent(self, event: QDropEvent) -> None:
         ids = decode_series_ids(event.mimeData())
