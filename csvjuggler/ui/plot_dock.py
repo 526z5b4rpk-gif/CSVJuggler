@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from functools import partial
+
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QDockWidget, QInputDialog, QToolBar, QVBoxLayout, QWidget
 
@@ -18,6 +20,8 @@ class PlotDock(QDockWidget):
     closed = Signal(object)
     """Emitted with the dock when the user closes it."""
     title_changed = Signal(str)
+    split_requested = Signal(object, object)
+    """``(dock, Qt.Orientation)``: Horizontal → new graph on the right, Vertical → below."""
 
     def __init__(
         self,
@@ -42,10 +46,16 @@ class PlotDock(QDockWidget):
         self.toolbar = QToolBar(self)
         self.toolbar.setMovable(False)
         self.toolbar.addAction(tr(Msg.ACTION_AUTO_RANGE), self.plot.auto_range)
-        self.toolbar.addAction(tr(Msg.ACTION_SPLIT), self.plot.split)
+        for text, tip, orientation in (
+            (Msg.ACTION_SPLIT_RIGHT, Msg.TIP_SPLIT_RIGHT, Qt.Orientation.Horizontal),
+            (Msg.ACTION_SPLIT_DOWN, Msg.TIP_SPLIT_DOWN, Qt.Orientation.Vertical),
+        ):
+            action = self.toolbar.addAction(tr(text), partial(self._request_split, orientation))
+            action.setToolTip(tr(tip))
+        self.toolbar.addAction(tr(Msg.ACTION_SPLIT), self.plot.split).setToolTip(tr(Msg.TIP_SPLIT))
         self.toolbar.addAction(
             tr(Msg.ACTION_UNSPLIT), lambda: self.plot.remove_subplot(len(self.plot.subplots) - 1)
-        )
+        ).setToolTip(tr(Msg.TIP_UNSPLIT))
         self.cursors_action = self.toolbar.addAction(tr(Msg.ACTION_AB_CURSORS))
         self.cursors_action.setCheckable(True)
         self.cursors_action.toggled.connect(self.cursors.set_enabled)
@@ -60,6 +70,9 @@ class PlotDock(QDockWidget):
         layout.addWidget(self.toolbar)
         layout.addWidget(self.plot)
         self.setWidget(body)
+
+    def _request_split(self, orientation: Qt.Orientation) -> None:
+        self.split_requested.emit(self, orientation)
 
     @property
     def dock_id(self) -> str:

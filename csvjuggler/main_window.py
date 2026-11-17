@@ -264,7 +264,12 @@ class MainWindow(QMainWindow):
     # -- plots ----------------------------------------------------------------------------
 
     def new_plot(
-        self, config: PlotConfig | None = None, dock_id: str | None = None, title: str | None = None
+        self,
+        config: PlotConfig | None = None,
+        dock_id: str | None = None,
+        title: str | None = None,
+        split_from: PlotDock | None = None,
+        orientation: Qt.Orientation = Qt.Orientation.Vertical,
     ) -> PlotDock:
         self._plot_counter += 1
         while dock_id is None or any(d.dock_id == dock_id for d in self.plot_docks):
@@ -280,9 +285,13 @@ class MainWindow(QMainWindow):
         dock.plot.missing_series_changed.connect(self._on_missing_series)
         dock.plot.activated.connect(lambda d=dock: self._set_current(d))
         dock.closed.connect(self._on_dock_closed)
+        dock.split_requested.connect(self.split_plot)
         self.x_sync.register(dock.plot)
+        dock.controller.menu_extensions.append(self._split_menu_extension(dock))
         dock.controller.menu_extensions.append(self.annotations.menu_extension(dock.dock_id))
-        if self.plot_docks:
+        if split_from is not None:
+            self.plot_area.splitDockWidget(split_from, dock, orientation)
+        elif self.plot_docks:
             self.plot_area.splitDockWidget(self.plot_docks[-1], dock, Qt.Orientation.Vertical)
         else:
             self.plot_area.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, dock)
@@ -318,6 +327,40 @@ class MainWindow(QMainWindow):
     def toggle_current_cursors(self) -> None:
         if self.current_dock is not None:
             self.current_dock.cursors_action.toggle()
+
+    def split_plot(self, source: PlotDock, orientation: Qt.Orientation) -> PlotDock:
+        """New graph next to ``source`` (right if Horizontal, below if Vertical), X-synced.
+
+        The new graph joins the sync group of ``source``; if ``source`` was not synchronised,
+        both join a new named group (other graphs are not affected).
+        """
+        group = source.plot.config.sync_group
+        if not group:
+            used = {d.plot.config.sync_group for d in self.plot_docks}
+            n = 1
+            while tr(Msg.SPLIT_GROUP).format(index=n) in used:
+                n += 1
+            group = tr(Msg.SPLIT_GROUP).format(index=n)
+            source.plot.set_sync_group(group)
+        config = PlotConfig(sync_group=group)
+        lo, hi = source.plot.x_range()
+        if source.isFloating():
+            source.setFloating(False)
+        dock = self.new_plot(config, split_from=source, orientation=orientation)
+        dock.plot.set_x_range(lo, hi)
+        return dock
+
+    def _split_menu_extension(self, dock: PlotDock) -> Callable[..., None]:
+        def extend(menu: QMenu, *_args: object) -> None:
+            menu.addAction(
+                tr(Msg.MENU_SPLIT_RIGHT),
+                partial(self.split_plot, dock, Qt.Orientation.Horizontal),
+            )
+            menu.addAction(
+                tr(Msg.MENU_SPLIT_DOWN), partial(self.split_plot, dock, Qt.Orientation.Vertical)
+            )
+
+        return extend
 
     def _raise_dock(self, dock_id: str) -> None:
         for dock in self.plot_docks:

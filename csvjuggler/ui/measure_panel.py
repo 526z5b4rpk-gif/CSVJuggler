@@ -6,6 +6,7 @@ import contextlib
 import math
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -62,7 +63,12 @@ class MeasurePanel(QWidget):
         layout.addLayout(top)
         layout.addWidget(self.source_label)
         layout.addWidget(self.table)
-        store.annotations_changed.connect(self.refresh)
+        # Coalesce bursts (pan/zoom, cursor drags) into one refresh.
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(80)
+        self._refresh_timer.timeout.connect(self.refresh)
+        store.annotations_changed.connect(self.schedule_refresh)
         self._connections: list[tuple[object, object]] = []
         self.refresh()
 
@@ -73,13 +79,18 @@ class MeasurePanel(QWidget):
         self._connections = []
         self.dock = dock
         if dock is not None:
-            signals = [dock.plot.config_changed, dock.cursors.changed, dock.plot.x_range_changed]
+            immediate = [dock.plot.config_changed, dock.cursors.changed]
             layer = dock.plot.annotation_layer
             if layer is not None:
-                signals.append(layer.hub.selected)
-            for signal in signals:
+                immediate.append(layer.hub.selected)
+            for signal in immediate:
                 signal.connect(self.refresh)
                 self._connections.append((signal, self.refresh))
+            # Range changes come in bursts (pan/zoom): coalesced. The view box signal (not
+            # PlotWidget.x_range_changed) also fires when another graph's X sync sets it.
+            range_signal = dock.plot.subplots[0].view_box.sigXRangeChanged
+            range_signal.connect(self.schedule_refresh)
+            self._connections.append((range_signal, self.schedule_refresh))
         self.refresh()
 
     # -- content --------------------------------------------------------------------------
@@ -133,6 +144,9 @@ class MeasurePanel(QWidget):
                 ]
             )
         return out
+
+    def schedule_refresh(self, *_args: object) -> None:
+        self._refresh_timer.start()
 
     def refresh(self, *_args: object) -> None:
         if self.dock is None:
