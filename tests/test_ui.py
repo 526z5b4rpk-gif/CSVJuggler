@@ -6,7 +6,7 @@ from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
 from PySide6.QtGui import QDropEvent
 
 from csvjuggler.main_window import MainWindow
-from csvjuggler.model.plot_config import CurveConfig, PlotConfig
+from csvjuggler.model.plot_config import CurveConfig, PlotConfig, SubplotConfig
 from csvjuggler.model.session import Session
 from csvjuggler.ui.plot_widget import PlotWidget
 from csvjuggler.ui.series_tree import SERIES_ID_ROLE, SeriesTree, decode_series_ids
@@ -54,15 +54,15 @@ def test_drop_series_on_plot(qtbot, data_dir: Path) -> None:
     with qtbot.waitSignal(plot.config_changed):
         event = _drop(plot, mime)
     assert event.isAccepted()
-    assert [c.series_id for c in plot.config.curves] == ["simple_comma/speed"]
+    assert [c.series_id for c in plot.config.all_curves()] == ["simple_comma/speed"]
     item = plot.curve_item("simple_comma/speed")
     assert item is not None
     assert item.opts["clipToView"] and item.opts["autoDownsample"]
 
     # Dropping the same series again does not duplicate it; a new one gets another colour.
     _drop(plot, tree.model.mimeData([tree.model.item(0).index()]))
-    assert len(plot.config.curves) == 3
-    assert len({c.color for c in plot.config.curves}) == 3
+    assert len(plot.config.all_curves()) == 3
+    assert len({c.color for c in plot.config.all_curves()}) == 3
 
 
 def test_drop_foreign_mime_is_ignored(qtbot) -> None:
@@ -72,7 +72,7 @@ def test_drop_foreign_mime_is_ignored(qtbot) -> None:
     mime.setText("hello")
     event = _drop(plot, mime)
     assert not event.isAccepted()
-    assert plot.config.curves == []
+    assert plot.config.all_curves() == []
 
 
 def test_apply_config_updates_without_recreating_items(qtbot, data_dir: Path) -> None:
@@ -83,7 +83,9 @@ def test_apply_config_updates_without_recreating_items(qtbot, data_dir: Path) ->
     plot.add_series(["simple_comma/speed"])
     item = plot.curve_item("simple_comma/speed")
 
-    cfg = PlotConfig(curves=[CurveConfig("simple_comma/speed", "#00ff00", width=3)])
+    cfg = PlotConfig(
+        subplots=[SubplotConfig(curves=[CurveConfig("simple_comma/speed", "#00ff00", width=3)])]
+    )
     plot.apply_config(cfg)
     assert plot.curve_item("simple_comma/speed") is item
     assert item.opts["pen"].width() == 3
@@ -93,7 +95,9 @@ def test_missing_series_reported(qtbot) -> None:
     plot = PlotWidget(Session())
     qtbot.addWidget(plot)
     with qtbot.waitSignal(plot.missing_series_changed) as blocker:
-        plot.apply_config(PlotConfig(curves=[CurveConfig("ghost/x", "#000000")]))
+        plot.apply_config(
+            PlotConfig(subplots=[SubplotConfig(curves=[CurveConfig("ghost/x", "#000")])])
+        )
     assert blocker.args == [["ghost/x"]]
 
 

@@ -28,6 +28,12 @@ class Msg:
     ACTION_QUIT = "&Quitter"
     ACTION_AUTO_RANGE = "Ajuster la vue"
     ACTION_CLEAR_PLOT = "Effacer le graphe"
+    ACTION_SPLIT = "Diviser"
+    ACTION_UNSPLIT = "Retirer un sous-graphe"
+    ACTION_RENAME = "Renommer…"
+    ACTION_NEW_PLOT = "&Nouveau graphe"
+    ACTION_TILE = "&Mosaïque automatique"
+    ACTION_CLOSE_ALL = "&Tout fermer"
 
     # Docks
     DOCK_SERIES = "Séries"
@@ -35,6 +41,8 @@ class Msg:
     FILTER_PLACEHOLDER = "Filtrer les séries…"
 
     # Dialogs
+    RENAME_PLOT_TITLE = "Renommer le graphe"
+    RENAME_PLOT_LABEL = "Nom du graphe :"
     OPEN_DIALOG_TITLE = "Ouvrir des fichiers CSV"
     OPEN_DIALOG_FILTER = "Fichiers CSV (*.csv *.tsv *.txt);;Tous les fichiers (*)"
     IMPORT_ERROR_TITLE = "Erreur d'import"

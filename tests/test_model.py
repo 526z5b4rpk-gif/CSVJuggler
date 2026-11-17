@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from csvjuggler.model.plot_config import CurveConfig, PlotConfig
+from csvjuggler.model.plot_config import CurveConfig, PlotConfig, SubplotConfig
 from csvjuggler.model.session import Session
 
 
@@ -17,14 +17,19 @@ def test_plot_config_json_roundtrip() -> None:
         title="Essai",
         show_grid_x=False,
         grid_alpha=0.5,
-        curves=[CurveConfig("a/x", "#000000"), CurveConfig("a/y", "#111111")],
+        sync_group="g1",
+        subplots=[
+            SubplotConfig(ratio=2.0, curves=[CurveConfig("a/x", "#000000")]),
+            SubplotConfig(curves=[CurveConfig("a/y", "#111111")]),
+        ],
     )
     assert PlotConfig.from_dict(json.loads(json.dumps(p.to_dict()))) == p
 
 
 def test_plot_config_ignores_unknown_keys() -> None:
-    p = PlotConfig.from_dict({"title": "t", "future_field": 1, "curves": []})
+    p = PlotConfig.from_dict({"title": "t", "future_field": 1})
     assert p.title == "t"
+    assert len(p.subplots) == 1
 
 
 def test_session_unique_aliases_and_lookup(qtbot, data_dir: Path) -> None:

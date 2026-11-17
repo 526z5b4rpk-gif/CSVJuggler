@@ -223,7 +223,7 @@ Valide chaque phase (démo et tests verts) avant de passer à la suivante. Une p
 ## État d'avancement
 
 - [x] Phase 1 — Squelette (18 tests verts ; smoke test : 10 M points, pire frame pan/zoom ≈ 46 ms en offscreen)
-- [ ] Phase 2 — Multi-fenêtres
+- [x] Phase 2 — Multi-fenêtres (docks, sous-graphes, synchro X par groupe, légende cliquable, mosaïque)
 - [ ] Phase 3 — Import avancé
 - [ ] Phase 4 — Personnalisation
 - [ ] Phase 5 — Axes secondaires
@@ -240,5 +240,9 @@ Valide chaque phase (démo et tests verts) avant de passer à la suivante. Une p
 - **Alias de dataset** : nom du fichier sans extension, `/` interdit (remplacé par `_`), suffixe `_2`, `_3`… si doublon. Les noms de colonne peuvent contenir `/` (on coupe au premier `/`).
 - **pyqtgraph 0.14** : l'API réelle est `setDownsampling(auto=True, method='peak')` (et non `mode=`). `setDownsampling`/`setClipToView` doivent être appelés **après** `plotItem.addItem(item)`, sinon pyqtgraph interroge le QGraphicsView au lieu de la ViewBox et lève une exception.
 - **Session** est un `QObject` (signal `datasets_changed`) : le modèle de l'arbre s'y abonne.
+- **Sous-graphes** : `PlotWidget` est un `pg.GraphicsLayoutWidget` ; chaque sous-graphe (`SubPlot`) est un `PlotItem` dont l'axe X est lié (`setXLink`) au premier. Seul le dernier affiche les graduations X. `PlotConfig.subplots: list[SubplotConfig]` porte les courbes et le ratio.
+- **Synchro X** : `ui/x_sync.py` (`XSyncManager`). `PlotConfig.sync_group` = `"global"` par défaut, `""` = non synchronisé, tout autre nom = groupe nommé. `PlotWidget.set_x_range` n'émet pas `x_range_changed` (pas de boucle).
+- **Grille** : les axes pyqtgraph dessinent la grille au-dessus des courbes ; on leur donne `zValue = -1000`.
+- **Fermeture d'un dock** = destruction (pas seulement masquage) ; « Tout fermer » laisse la zone vide, « Nouveau graphe » (Ctrl+N) en recrée un.
 - Phase 1 : import synchrone (le QThread arrive en phase 3 avec le dialogue d'import). L'option `-l` est acceptée mais seulement journalisée (phase 7).
 - Environnement de dev : `python -m venv .venv && .venv/bin/pip install -e '.[dev]'` ; tests en `QT_QPA_PLATFORM=offscreen` (forcé dans `tests/conftest.py`).
