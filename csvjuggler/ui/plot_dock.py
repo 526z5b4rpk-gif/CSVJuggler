@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QDockWidget, QInputDialog, QToolBar, QVBoxLayout, 
 from csvjuggler.i18n import Msg, tr
 from csvjuggler.model.plot_config import PlotConfig
 from csvjuggler.model.session import Session
+from csvjuggler.ui.cursors import ABCursors, Tracker
 from csvjuggler.ui.plot_menus import PlotController
 from csvjuggler.ui.plot_widget import PlotWidget
 
@@ -35,6 +36,8 @@ class PlotDock(QDockWidget):
         )
         self.plot = PlotWidget(session, config)
         self.controller = PlotController(self.plot, self)
+        self.tracker = Tracker(self.plot)
+        self.cursors = ABCursors(self.plot)
 
         self.toolbar = QToolBar(self)
         self.toolbar.setMovable(False)
@@ -43,6 +46,9 @@ class PlotDock(QDockWidget):
         self.toolbar.addAction(
             tr(Msg.ACTION_UNSPLIT), lambda: self.plot.remove_subplot(len(self.plot.subplots) - 1)
         )
+        self.cursors_action = self.toolbar.addAction(tr(Msg.ACTION_AB_CURSORS))
+        self.cursors_action.setCheckable(True)
+        self.cursors_action.toggled.connect(self.cursors.set_enabled)
         self.toolbar.addAction(tr(Msg.MENU_PLOT_SETTINGS), self.controller.edit_plot_settings)
         self.toolbar.addAction(tr(Msg.ACTION_RENAME), self.ask_rename)
         self.toolbar.addAction(tr(Msg.ACTION_CLEAR_PLOT), self.plot.clear_curves)

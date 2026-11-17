@@ -53,6 +53,7 @@ csvjuggler/
 │   ├── multi_axis.py      # Gestion des axes Y secondaires (ViewBox liées)
 │   ├── cursors.py         # Curseurs de mesure et tracker
 │   ├── annotation_panel.py# Panneau latéral listant les annotations
+│   ├── measure_panel.py   # Panneau « Mesures » (curseurs A/B, statistiques, TSV)
 │   ├── annotation_items.py# Items graphiques d'annotation (éditables, déplaçables)
 │   └── dialogs/
 │       ├── import_dialog.py
@@ -235,7 +236,7 @@ Valide chaque phase (démo et tests verts) avant de passer à la suivante. Une p
 - [x] Phase 5 — Axes secondaires (ViewBox liées, molette par axe, déplacement de courbe, dépôt sur la marge droite, suppression auto)
 - [x] Phase 6 — Annotations (4 types, déplacement, édition, Suppr, panneau, lignes liées, fichier compagnon)
 - [x] Phase 7 — Layouts (*.cjl.json versionné, réapplication sur un autre CSV, séries manquantes signalées, récents, dernier layout)
-- [ ] Phase 8 — Mesure
+- [x] Phase 8 — Mesure (tracker T synchronisé, interpolation/plus proche, curseurs A/B, statistiques A–B ou région, copie TSV)
 - [ ] Phase 9 — Séries calculées et export
 
 ### Décisions prises
@@ -268,6 +269,8 @@ Valide chaque phase (démo et tests verts) avant de passer à la suivante. Une p
 - **Panneau d'annotations** : `ui/annotation_panel.py`, dock à gauche sous l'arbre des séries ; clic = centrer la vue (largeur de zoom conservée), double-clic = éditer, Suppr = supprimer.
 - **Layout** (`model/layout.py`) : `Layout{version, datasets[DatasetRef(alias, path, import_settings)], docks[DockConfig(dock_id, title, plot)], dock_state, window_state, annotations, derived}`. Disposition des docks = `QMainWindow.saveState()` (zone des graphes et fenêtre principale) en base64 ; les `dock_id` sont conservés (référencés par `saveState` et par `Annotation.plot_id`). `migrate()` gère la v0 (liste `curves` à plat). Écriture atomique.
 - **Chargement d'un layout** : pour chaque dataset du layout, dans l'ordre : fichier de remplacement (`-l` + fichiers en CLI, ou `file_overrides`) → dataset déjà chargé sous le même alias → chemin enregistré → fichier de même nom à côté du layout → (interactif) demande d'un fichier de remplacement. Le fichier est relu avec les `import_settings` du layout et **l'alias du layout** (les identifiants de séries restent valides). Les séries manquantes restent dans la config (elles réapparaissent si un fichier complet est chargé) et sont signalées (barre d'état + boîte d'info en interactif), jamais bloquantes. Les annotations : `reload_companions()` puis fusion de celles du layout (par id, le layout gagne).
+- **Mesure** : calculs purs dans `data/analysis.py` (`value_at`, `interval_stats`, `to_tsv`). `ui/cursors.py` : `Tracker` (un par graphe, activé globalement par T ; la position est propagée aux graphes du même groupe de synchro) et `ABCursors` (par graphe, bouton « Curseurs A/B » ou Ctrl+B ; lignes recopiées dans chaque sous-graphe). Les valeurs sont celles **affichées** (gain/offset appliqués ; en mode XY → point le plus proche). Panneau `ui/measure_panel.py` (dock en bas) pour le graphe courant : Δt, 1/Δt, Y(A), Y(B), ΔY, et statistiques sur [A, B] si les curseurs sont actifs, sinon sur la région d'annotation sélectionnée, sinon sur la plage X visible. « Copier (TSV) » → presse-papiers.
+- **Tests** : ne jamais créer d'annotation sur un CSV de `tests/data/` (fichier compagnon écrit à côté) — copier le CSV dans `tmp_path`. Une fixture autouse de `conftest.py` échoue sinon.
 - **QSettings** : `recent_files`, `recent_layouts` (10 max), `last_layout` (dernier layout enregistré/ouvert, rechargé au démarrage sans argument). `MainWindow` reçoit un `QSettings` (fichier ini temporaire dans les tests).
 - **CLI** : `csvjuggler fichier.csv` importe directement ; `csvjuggler fichier.csv -l layout.cjl.json` applique le layout en remplaçant ses fichiers dans l'ordre ; sans argument, restaure le dernier layout.
 - Environnement de dev : `python -m venv .venv && .venv/bin/pip install -e '.[dev]'` ; tests en `QT_QPA_PLATFORM=offscreen` (forcé dans `tests/conftest.py`).

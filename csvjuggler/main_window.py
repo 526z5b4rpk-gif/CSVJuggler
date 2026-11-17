@@ -11,7 +11,14 @@ from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent, QKeySequence
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QCloseEvent,
+    QDragEnterEvent,
+    QDropEvent,
+    QKeySequence,
+)
 from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
@@ -45,6 +52,7 @@ from csvjuggler.ui.annotation_items import AnnotationManager
 from csvjuggler.ui.annotation_panel import AnnotationPanel
 from csvjuggler.ui.dialogs.annotation_dialog import edit_annotation
 from csvjuggler.ui.dialogs.import_dialog import ImportDialog
+from csvjuggler.ui.measure_panel import MeasurePanel
 from csvjuggler.ui.plot_dock import PlotDock
 from csvjuggler.ui.progress import run_with_progress
 from csvjuggler.ui.series_tree import SeriesTree
@@ -127,6 +135,14 @@ class MainWindow(QMainWindow):
         self._companion_timer.setInterval(500)
         self._companion_timer.timeout.connect(session.save_companions)
         session.annotations.annotations_changed.connect(self._companion_timer.start)
+
+        self.measure_panel = MeasurePanel(session.annotations)
+        self.measure_dock = QDockWidget(tr(Msg.DOCK_MEASURES), self)
+        self.measure_dock.setObjectName("measure_dock")
+        self.measure_dock.setWidget(self.measure_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.measure_dock)
+        self.tracker_enabled = False
+        self.tracker_mode = "linear"
         self._build_menus()
         session.series_data_changed.connect(self._on_series_data_changed)
         session.series_names_changed.connect(self._refresh_all_plots)
@@ -179,6 +195,27 @@ class MainWindow(QMainWindow):
         window_menu.addAction(new_action)
         window_menu.addAction(tr(Msg.ACTION_TILE), self.tile_plots)
         window_menu.addAction(tr(Msg.ACTION_CLOSE_ALL), self.close_all_plots)
+        window_menu.addSeparator()
+        for dock in (self.annotation_dock, self.measure_dock):
+            window_menu.addAction(dock.toggleViewAction())
+
+        measure_menu = self.menuBar().addMenu(tr(Msg.MENU_MEASURE))
+        self.tracker_action = QAction(tr(Msg.ACTION_TRACKER), self)
+        self.tracker_action.setShortcut(QKeySequence("T"))
+        self.tracker_action.setCheckable(True)
+        self.tracker_action.toggled.connect(self.set_tracker_enabled)
+        measure_menu.addAction(self.tracker_action)
+        interp_menu = measure_menu.addMenu(tr(Msg.MENU_INTERPOLATION))
+        group = QActionGroup(self)
+        for text, mode in ((Msg.INTERP_LINEAR, "linear"), (Msg.INTERP_NEAREST, "nearest")):
+            action = interp_menu.addAction(tr(text), partial(self.set_tracker_mode, mode))
+            action.setCheckable(True)
+            action.setChecked(mode == "linear")
+            group.addAction(action)
+        ab_action = QAction(tr(Msg.ACTION_AB_CURSORS), self)
+        ab_action.setShortcut(QKeySequence("Ctrl+B"))
+        ab_action.triggered.connect(self.toggle_current_cursors)
+        measure_menu.addAction(ab_action)
 
     # -- plots ----------------------------------------------------------------------------
 
@@ -207,8 +244,36 @@ class MainWindow(QMainWindow):
             self.plot_area.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, dock)
         self.plot_docks.append(dock)
         self.annotations.register_plot(dock.plot)
+        dock.tracker.set_mode(self.tracker_mode)  # type: ignore[arg-type]
+        dock.tracker.set_enabled(self.tracker_enabled)
+        dock.tracker.moved.connect(lambda x, d=dock: self._on_tracker_moved(d, x))
         self._set_current(dock)
         return dock
+
+    # -- measurement ----------------------------------------------------------------------
+
+    def set_tracker_enabled(self, enabled: bool) -> None:
+        self.tracker_enabled = enabled
+        if self.tracker_action.isChecked() != enabled:
+            self.tracker_action.setChecked(enabled)
+        for dock in self.plot_docks:
+            dock.tracker.set_enabled(enabled)
+
+    def set_tracker_mode(self, mode: str) -> None:
+        self.tracker_mode = mode
+        for dock in self.plot_docks:
+            dock.tracker.set_mode(mode)  # type: ignore[arg-type]
+
+    def _on_tracker_moved(self, source: PlotDock, x: float) -> None:
+        """The tracker follows the mouse on the synchronised graphs too."""
+        peers = set(map(id, self.x_sync.peers(source.plot)))
+        for dock in self.plot_docks:
+            if id(dock.plot) in peers:
+                dock.tracker.set_x(x)
+
+    def toggle_current_cursors(self) -> None:
+        if self.current_dock is not None:
+            self.current_dock.cursors_action.toggle()
 
     def _raise_dock(self, dock_id: str) -> None:
         for dock in self.plot_docks:
@@ -217,8 +282,11 @@ class MainWindow(QMainWindow):
                 dock.raise_()
                 self._set_current(dock)
 
-    def _set_current(self, dock: PlotDock) -> None:
+    def _set_current(self, dock: PlotDock | None) -> None:
+        if dock is self.current_dock:
+            return
         self.current_dock = dock
+        self.measure_panel.set_dock(dock)
 
     def _on_dock_closed(self, dock: PlotDock) -> None:
         if dock in self.plot_docks:
@@ -226,7 +294,7 @@ class MainWindow(QMainWindow):
         self.x_sync.unregister(dock.plot)
         self.annotations.unregister_plot(dock.plot)
         if self.current_dock is dock:
-            self.current_dock = self.plot_docks[-1] if self.plot_docks else None
+            self._set_current(self.plot_docks[-1] if self.plot_docks else None)
         self.plot_area.removeDockWidget(dock)
         dock.deleteLater()
 
