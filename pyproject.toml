@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "csvjuggler"
+version = "0.1.0"
+description = "Visualiseur de séries temporelles CSV inspiré de PlotJuggler"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.6",
+    "pyqtgraph>=0.13.7",
+    "pandas>=2.1",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-qt>=4.4", "ruff>=0.6", "mypy>=1.10"]
+
+[project.scripts]
+csvjuggler = "csvjuggler.app:main"
+
+[tool.setuptools.packages.find]
+include = ["csvjuggler*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"
