@@ -27,6 +27,7 @@ from csvjuggler.model.plot_config import (
     SubplotConfig,
 )
 from csvjuggler.model.session import Session
+from csvjuggler.ui.multi_axis import MultiAxis
 from csvjuggler.ui.plot_items import DateAxis, FormattedAxis, PlotViewBox
 from csvjuggler.ui.series_tree import SERIES_MIME_TYPE, decode_series_ids
 from csvjuggler.utils.colors import next_color
@@ -45,6 +46,8 @@ LEGEND_ANCHORS: dict[str, tuple[tuple[int, int], tuple[int, int], tuple[int, int
     "bottom-right": ((1, 1), (1, 1), (-10, -10)),
 }
 CURVE_PICK_DISTANCE_PX = 8.0
+RIGHT_MARGIN_DROP_PX = 40.0
+"""A drop this close to the right edge of the plotting area (or beyond) creates a new axis."""
 
 
 def display_data(
@@ -86,6 +89,7 @@ class SubPlot:
         self._data_keys: dict[str, tuple[Any, ...]] = {}
         self._range_keys: dict[str, tuple[Any, ...]] = {}
         self._keep_axes_under_curves()
+        self.multi_axis = MultiAxis(self.plot_item, self.view_box, self._connect_axis)
         self.view_box.menu_requested.connect(self._on_menu)
         self.view_box.double_clicked.connect(lambda _ev: owner.plot_settings_requested.emit())
         self._connect_axis(self.left_axis)
@@ -117,10 +121,20 @@ class SubPlot:
         self.owner.plot_menu_requested.emit(self.index, ev.scenePos(), ev.screenPos())
 
     def view_for_axis(self, axis_id: str) -> pg.ViewBox:
+        if axis_id in self.multi_axis:
+            return self.multi_axis.view(axis_id)
         return self.view_box
 
     def axis_item(self, axis_id: str) -> FormattedAxis | DateAxis:
-        return self.bottom_axis if axis_id == X_AXIS_ID else self.left_axis
+        if axis_id == X_AXIS_ID:
+            return self.bottom_axis
+        if axis_id in self.multi_axis:
+            return self.multi_axis.axis(axis_id)
+        return self.left_axis
+
+    def is_in_right_margin(self, scene_pos: QPointF) -> bool:
+        rect = self.view_box.sceneBoundingRect()
+        return scene_pos.x() >= rect.right() - RIGHT_MARGIN_DROP_PX
 
     # -- apply ----------------------------------------------------------------------------
 
@@ -132,7 +146,16 @@ class SubPlot:
             x=plot_cfg.show_grid_x, y=plot_cfg.show_grid_y, alpha=plot_cfg.grid_alpha
         )
         self._apply_legend(plot_cfg.legend_position)
-        return self._apply_curves(cfg, plot_cfg)
+        missing = self._apply_curves(cfg, plot_cfg)
+        secondary = {a.axis_id for a in cfg.y_axes[1:]}
+        self.multi_axis.remove_unused(secondary)
+        for axis_id in [a for a in self._range_keys if a != X_AXIS_ID]:
+            if axis_id not in secondary and axis_id != cfg.y_axes[0].axis_id:
+                del self._range_keys[axis_id]
+        for view in [self.view_box, *self.view_box.secondary_views]:
+            if any(view.autoRangeEnabled()):
+                view.updateAutoRange()
+        return missing
 
     def _apply_x_axis(self, cfg: AxisConfig, show_values: bool) -> None:
         want_date = cfg.x_mode == "absolute"
@@ -159,6 +182,16 @@ class SubPlot:
 
     def _apply_y_axes(self, cfg: SubplotConfig) -> None:
         self._apply_y_axis(self.left_axis, self.view_box, cfg.y_axes[0], None)
+        secondary = cfg.y_axes[1:]
+        self.multi_axis.ensure([a.axis_id for a in secondary])
+        for axis_cfg in secondary:
+            first = next((c for c in cfg.curves if c.axis_id == axis_cfg.axis_id), None)
+            self._apply_y_axis(
+                self.multi_axis.axis(axis_cfg.axis_id),
+                self.multi_axis.view(axis_cfg.axis_id),
+                axis_cfg,
+                first.color if first else None,
+            )
 
     def _apply_y_axis(
         self,
@@ -265,9 +298,13 @@ class SubPlot:
     def _move_to_view(item: pg.PlotDataItem, view_box: pg.ViewBox) -> None:
         current = item.getViewBox()
         if current is not view_box:
+            # Same pyqtgraph 0.14 pitfall as in _create_item: while it moves, the item briefly
+            # has no ViewBox parent, which clipToView does not survive.
+            item.setClipToView(False)
             if current is not None:
                 current.removeItem(item)
             view_box.addItem(item)
+            item.setClipToView(True)
 
     def _style_item(self, item: pg.PlotDataItem, curve: CurveConfig, name: str) -> None:
         marker = None if curve.marker == "none" else curve.marker
@@ -305,6 +342,7 @@ class SubPlot:
     def clear(self) -> None:
         for series_id in list(self.items):
             self.remove_item(series_id)
+        self.multi_axis.remove_unused(set())
         self._range_keys.clear()
 
     # -- picking --------------------------------------------------------------------------
@@ -409,6 +447,8 @@ class PlotWidget(pg.GraphicsLayoutWidget):
 
     def _commit(self) -> None:
         """Apply the (mutated) current config and notify listeners."""
+        for sub_cfg in self._config.subplots:
+            sub_cfg.prune_axes()  # an axis without curves is removed
         self.apply_config(self._config)
         self.config_changed.emit()
 
@@ -500,20 +540,49 @@ class PlotWidget(pg.GraphicsLayoutWidget):
 
     # -- curves ---------------------------------------------------------------------------
 
-    def add_series(self, series_ids: list[str], subplot: int = 0) -> list[str]:
-        """Add curves to ``subplot`` (already present ids are skipped). Returns added ids."""
+    def add_series(
+        self, series_ids: list[str], subplot: int = 0, new_axis: bool = False
+    ) -> list[str]:
+        """Add curves to ``subplot`` (already present ids are skipped). Returns added ids.
+
+        With ``new_axis`` the curves go to a new secondary Y axis.
+        """
         sub_cfg = self._config.subplots[min(subplot, len(self._config.subplots) - 1)]
-        added: list[str] = []
-        for series_id in series_ids:
-            if sub_cfg.curve(series_id) or self.session.get_series(series_id) is None:
-                continue
+        ids = [
+            sid
+            for sid in series_ids
+            if not sub_cfg.curve(sid) and self.session.get_series(sid) is not None
+        ]
+        if not ids:
+            return []
+        axis_id = self._new_axis(sub_cfg, ids[0]) if new_axis else sub_cfg.y_axes[0].axis_id
+        for series_id in ids:
             color = next_color(c.color for c in self._config.all_curves())
-            curve = CurveConfig(series_id=series_id, color=color, axis_id=sub_cfg.y_axes[0].axis_id)
-            sub_cfg.curves.append(curve)
-            added.append(series_id)
-        if added:
-            self._commit()
-        return added
+            sub_cfg.curves.append(CurveConfig(series_id=series_id, color=color, axis_id=axis_id))
+        self._commit()
+        return ids
+
+    def _new_axis(self, sub_cfg: SubplotConfig, series_id: str) -> str:
+        series = self.session.get_series(series_id)
+        axis = AxisConfig(
+            axis_id=sub_cfg.new_axis_id(), side="right", unit=series.unit if series else ""
+        )
+        sub_cfg.y_axes.append(axis)
+        return axis.axis_id
+
+    def move_curve_to_axis(self, subplot: int, series_id: str, axis_id: str | None) -> str:
+        """Attach a curve to ``axis_id`` (``None`` → a new secondary axis). Returns the axis."""
+        sub_cfg = self._config.subplots[subplot]
+        curve = sub_cfg.curve(series_id)
+        if curve is None:
+            raise KeyError(series_id)
+        if axis_id is None:
+            axis_id = self._new_axis(sub_cfg, series_id)
+        elif sub_cfg.axis(axis_id) is None:
+            raise KeyError(axis_id)
+        curve.axis_id = axis_id
+        self._commit()
+        return axis_id
 
     def curve_config(self, subplot: int, series_id: str) -> CurveConfig | None:
         return self._config.subplots[subplot].curve(series_id)
@@ -607,4 +676,6 @@ class PlotWidget(pg.GraphicsLayoutWidget):
         event.accept()
         scene_pos = self.mapToScene(event.position().toPoint())
         self.activated.emit()
-        self.add_series(ids, self.subplot_at(scene_pos))
+        subplot = self.subplot_at(scene_pos)
+        new_axis = self.subplots[subplot].is_in_right_margin(scene_pos)
+        self.add_series(ids, subplot, new_axis=new_axis)

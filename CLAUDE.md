@@ -231,7 +231,7 @@ Valide chaque phase (démo et tests verts) avant de passer à la suivante. Une p
 - [x] Phase 2 — Multi-fenêtres (docks, sous-graphes, synchro X par groupe, légende cliquable, mosaïque)
 - [x] Phase 3 — Import avancé (dialogue, Scope multi-en-têtes, paires temps/valeur, unités, date/heure, alias, renommage, Ctrl+R, QThread)
 - [x] Phase 4 — Personnalisation (PlotConfig/AxisConfig/CurveConfig, dialogues, menus contextuels, double-clics)
-- [ ] Phase 5 — Axes secondaires
+- [x] Phase 5 — Axes secondaires (ViewBox liées, molette par axe, déplacement de courbe, dépôt sur la marge droite, suppression auto)
 - [ ] Phase 6 — Annotations
 - [ ] Phase 7 — Layouts
 - [ ] Phase 8 — Mesure
@@ -258,5 +258,9 @@ Valide chaque phase (démo et tests verts) avant de passer à la suivante. Une p
 - **Personnalisation** : `ui/plot_items.py` fournit `PlotViewBox` (clic droit / double-clic remontés en signaux, menu pyqtgraph remplacé), `FormattedAxis` (format des graduations : décimales, scientifique, préfixes SI ; clic droit / double-clic) et `DateAxis` (axe X absolu, secondes epoch, `utcOffset=0`). `ui/plot_menus.py` (`PlotController`) transforme ces demandes en menus/dialogues ; les phases suivantes ajoutent leurs entrées via `menu_extensions` / `curve_menu_extensions`. Couleur : `ui/widgets.py` (`ColorButton`).
 - **Plages d'axes** : `apply_config` ne retouche la plage d'un axe que si `(auto_range, min, max, log, inverted)` a changé ; un changement de style conserve donc le zoom de l'utilisateur. « Auto une fois » = ajuster puis mémoriser en plage manuelle.
 - **Données affichées** : `setData` seulement si la série, le gain/offset, le mode ou la série X (mode XY) ont changé. Mode escalier = `stepMode="left"` (maintien). Mode XY : la série X est interpolée sur le vecteur X de chaque courbe si besoin.
+- **Axes secondaires** (`ui/multi_axis.py`) : ViewBox de premier niveau dans la scène, `zValue` sous le PlotItem → la zone de tracé (glisser, molette) ne pilote que X et l'axe principal ; la molette/le glisser sur un axe secondaire n'agit que sur lui (`SecondaryViewBox` ignore les événements sans `axis`). Géométrie = position de la ViewBox principale + `size()` (pas `sceneBoundingRect()`, qui ajoute 0,5 px). `PlotViewBox.childrenBounds` agrège l'étendue X des vues secondaires pour l'auto-range X. Axes secondaires placés **à droite** uniquement (colonnes 3, 4… du layout du PlotItem) ; `AxisConfig.side` est réservé pour un placement à gauche ultérieur.
+- **Axe sans courbe** : `SubplotConfig.prune_axes()` est appelé à chaque `_commit` (l'axe principal est toujours conservé).
+- **Piège pyqtgraph** : désactiver `clipToView` pendant qu'un item change de ViewBox (`_move_to_view`, `MultiAxis._remove`), sinon exception (même cause que pour `addItem`).
+- **Dépôt sur la marge droite** : à moins de 40 px du bord droit de la zone de tracé, ou au-delà (zone des axes secondaires) → nouvel axe.
 - L'option `-l` est acceptée mais seulement journalisée jusqu'à la phase 7.
 - Environnement de dev : `python -m venv .venv && .venv/bin/pip install -e '.[dev]'` ; tests en `QT_QPA_PLATFORM=offscreen` (forcé dans `tests/conftest.py`).

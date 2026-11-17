@@ -82,6 +82,20 @@ class PlotController(QObject):
             tr(Msg.MENU_HIDE if curve.visible else Msg.MENU_SHOW),
             lambda: plot.set_curve_visible(curve.series_id, not curve.visible),
         )
+        axes_menu = menu.addMenu(tr(Msg.MENU_MOVE_TO_AXIS))
+        for k, axis in enumerate(plot.config.subplots[subplot].y_axes):
+            name = tr(Msg.AXIS_Y_NAME).format(index=k + 1, subplot=subplot + 1)
+            if axis.title:
+                name += f" — {axis.title}"
+            action = axes_menu.addAction(
+                name, partial(plot.move_curve_to_axis, subplot, curve.series_id, axis.axis_id)
+            )
+            action.setCheckable(True)
+            action.setChecked(axis.axis_id == curve.axis_id)
+        axes_menu.addSeparator()
+        axes_menu.addAction(
+            tr(Msg.MENU_NEW_AXIS), partial(plot.move_curve_to_axis, subplot, curve.series_id, None)
+        )
         for extension in self.curve_menu_extensions:
             extension(menu, plot, subplot, curve)
         menu.addAction(

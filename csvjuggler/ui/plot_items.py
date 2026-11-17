@@ -15,6 +15,24 @@ class PlotViewBox(pg.ViewBox):
     """Right click: the pyqtgraph MouseClickEvent."""
     double_clicked = Signal(object)
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.secondary_views: list[pg.ViewBox] = []
+        """Secondary-axis views (X-linked): their X extent counts for the automatic X range."""
+
+    def childrenBounds(self, frac=None, orthoRange=(None, None), items=None):
+        bounds = super().childrenBounds(frac=frac, orthoRange=orthoRange, items=items)
+        if items is None:
+            for view in self.secondary_views:
+                x_range = view.childrenBounds(frac=frac)[0]
+                if x_range is None:
+                    continue
+                if bounds[0] is None:
+                    bounds[0] = [x_range[0], x_range[1]]
+                else:
+                    bounds[0] = [min(bounds[0][0], x_range[0]), max(bounds[0][1], x_range[1])]
+        return bounds
+
     def mouseClickEvent(self, ev) -> None:
         if ev.button() == Qt.MouseButton.RightButton:
             ev.accept()

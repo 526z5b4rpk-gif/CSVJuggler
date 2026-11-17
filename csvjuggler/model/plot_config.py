@@ -103,6 +103,26 @@ class SubplotConfig:
     def axis(self, axis_id: str) -> AxisConfig | None:
         return next((a for a in self.y_axes if a.axis_id == axis_id), None)
 
+    def new_axis_id(self) -> str:
+        used = {a.axis_id for a in self.y_axes}
+        n = 1
+        while f"y{n}" in used:
+            n += 1
+        return f"y{n}"
+
+    def prune_axes(self) -> bool:
+        """Remove secondary axes without curves. Returns True if something was removed."""
+        used = {c.axis_id for c in self.curves}
+        kept = [self.y_axes[0]] + [a for a in self.y_axes[1:] if a.axis_id in used]
+        removed = len(kept) != len(self.y_axes)
+        self.y_axes = kept
+        primary = self.y_axes[0].axis_id
+        known = {a.axis_id for a in self.y_axes}
+        for c in self.curves:
+            if c.axis_id not in known:
+                c.axis_id = primary
+        return removed
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "ratio": self.ratio,

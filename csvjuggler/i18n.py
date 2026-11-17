@@ -168,6 +168,8 @@ class Msg:
     MENU_SYNC_NEW = "Groupe nommé…"
     MENU_SYNC_NEW_LABEL = "Nom du groupe :"
     MENU_REMOVE_SUBPLOT = "Retirer ce sous-graphe"
+    MENU_MOVE_TO_AXIS = "Déplacer vers l'axe"
+    MENU_NEW_AXIS = "Nouvel axe"
 
     # Status bar
     STATUS_LOADED = "« {alias} » chargé : {count} séries, {points} points"
