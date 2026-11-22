@@ -12,14 +12,17 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 from collections.abc import Callable
+from datetime import UTC, datetime
 from functools import partial
 
 import pyqtgraph as pg
-from PySide6.QtCore import QObject, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QObject, QPointF, QRectF, QSizeF, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QTransform
 from PySide6.QtWidgets import QMenu, QWidget
 
+from csvjuggler.data.analysis import format_number
 from csvjuggler.i18n import Msg, tr
 from csvjuggler.model.annotation import Annotation, AnnotationKind
 from csvjuggler.model.session import Session
@@ -68,12 +71,27 @@ def _handle_click(item: pg.GraphicsObject, ann: Annotation, hub: AnnotationHub, 
     return False
 
 
+CoordsFormatter = Callable[[float, float], str]
+"""Text of the anchor point coordinates, ``(x, y)`` → e.g. ``"x = 5.2 s   y = 1500 rpm"``."""
+
+
+def _text_size(font: QFont, text: str) -> QSizeF:
+    """Size of a (multi-line) text, rounded up so that nothing gets clipped."""
+    if not text:
+        return QSizeF(0.0, 0.0)
+    metrics = QFontMetricsF(font)
+    lines = text.split("\n")
+    width = max(metrics.horizontalAdvance(line) for line in lines)
+    return QSizeF(math.ceil(width) + 2.0, math.ceil(metrics.lineSpacing() * len(lines)))
+
+
 class TextAnnotationItem(pg.GraphicsObject):
     """Text in a rounded bubble anchored at (x, y), draggable unless locked.
 
     With ``ann.arrow`` the bubble sits above-right of the point and a tail points to it
     (a small dot marks the point); otherwise the bubble's bottom-left corner is the point.
-    Drawn in pixels (ignores the view scale), so it keeps its size when zooming.
+    With ``ann.show_coords`` a last line shows the point coordinates (updated while dragging).
+    Pixel-sized: the item cancels the view scale with its own transform (as ``pg.TextItem``).
     """
 
     PADDING = (8.0, 5.0)
@@ -83,27 +101,51 @@ class TextAnnotationItem(pg.GraphicsObject):
     TAIL_BASE = (8.0, 20.0)
     """Tail base along the bubble's bottom edge, from its left side."""
     SHADOW = QPointF(2.0, 2.0)
+    LINE_GAP = 2.0
 
-    def __init__(self, ann: Annotation, hub: AnnotationHub) -> None:
+    def __init__(
+        self, ann: Annotation, hub: AnnotationHub, coords: CoordsFormatter | None = None
+    ) -> None:
         super().__init__()
         self.ann, self.hub = ann, hub
-        self.setFlag(self.GraphicsItemFlag.ItemIgnoresTransformations)
+        self.coords = coords
+        self._last_transform: QTransform | None = None
         self.setPos(ann.x, ann.y)
         self.setOpacity(ann.opacity)
         self.font = _font(ann)
-        self.text = ann.text or " "
-        metrics = QFontMetricsF(self.font)
-        text_rect = metrics.boundingRect(
-            QRectF(0, 0, 10000, 10000), int(Qt.AlignmentFlag.AlignLeft), self.text
-        )
+        self.coords_font = QFont(self.font)
+        self.coords_font.setPointSize(max(5, ann.font_size - 1))
+        self._drag_offset = QPointF()
+        self._layout(ann.x, ann.y)
+
+    def coords_text(self, x: float, y: float) -> str:
+        if not self.ann.show_coords or self.coords is None:
+            return ""
+        return self.coords(x, y)
+
+    def _layout(self, x: float, y: float) -> None:
+        """Compute the bubble geometry for the texts shown with the point at (x, y)."""
+        self.prepareGeometryChange()
+        self.text = self.ann.text
+        self.coords_line = self.coords_text(x, y)
+        if not self.text and not self.coords_line:
+            self.text = " "
+        text_size = _text_size(self.font, self.text)
+        coords_size = _text_size(self.coords_font, self.coords_line)
+        gap = self.LINE_GAP if self.text and self.coords_line else 0.0
         pad_x, pad_y = self.PADDING
-        width, height = text_rect.width() + 2 * pad_x, text_rect.height() + 2 * pad_y
-        origin = self.TAIL_OFFSET if ann.arrow else QPointF(0.0, 0.0)
+        width = max(text_size.width(), coords_size.width()) + 2 * pad_x
+        height = text_size.height() + gap + coords_size.height() + 2 * pad_y
+        origin = self.TAIL_OFFSET if self.ann.arrow else QPointF(0.0, 0.0)
         self.box = QRectF(origin.x(), origin.y() - height, width, height)
-        self.text_rect = self.box.adjusted(pad_x, pad_y, -pad_x, -pad_y)
+        left, top = self.box.left() + pad_x, self.box.top() + pad_y
+        self.text_rect = QRectF(left, top, text_size.width(), text_size.height())
+        self.coords_rect = QRectF(
+            left, top + text_size.height() + gap, coords_size.width(), coords_size.height()
+        )
         path = QPainterPath()
         path.addRoundedRect(self.box, self.RADIUS, self.RADIUS)
-        if ann.arrow:
+        if self.ann.arrow:
             base0, base1 = self.TAIL_BASE
             tail = QPainterPath(QPointF(0.0, 0.0))
             tail.lineTo(self.box.left() + base0, self.box.bottom() - 1)
@@ -114,7 +156,32 @@ class TextAnnotationItem(pg.GraphicsObject):
         self._bounds = self.path.boundingRect().adjusted(
             -3, -3, 3 + self.SHADOW.x(), 3 + self.SHADOW.y()
         )
-        self._drag_offset = QPointF()
+        self.update()
+
+    def _update_transform(self) -> None:
+        """Cancel the view scale (pixel-sized bubble) while keeping hit-testing working.
+
+        Same technique as ``pg.TextItem``: ``ItemIgnoresTransformations`` would break
+        pyqtgraph's mouse interaction (the item is never found under the cursor).
+        """
+        parent = self.parentItem()
+        pt = parent.sceneTransform() if parent is not None else QTransform()
+        if pt == self._last_transform:
+            return
+        self._last_transform = pt
+        inv, _ok = pt.inverted()
+        self.setTransform(
+            QTransform(inv.m11(), inv.m12(), inv.m13(), inv.m21(), inv.m22(), inv.m23(), 0, 0, 1)
+        )
+
+    def viewTransformChanged(self) -> None:
+        self._update_transform()
+
+    def itemChange(self, change, value):
+        if change == self.GraphicsItemChange.ItemParentHasChanged:
+            self._last_transform = None
+            self._update_transform()
+        return super().itemChange(change, value)
 
     def boundingRect(self) -> QRectF:
         return self._bounds
@@ -123,6 +190,7 @@ class TextAnnotationItem(pg.GraphicsObject):
         return self.path
 
     def paint(self, painter: QPainter, *_args: object) -> None:
+        self._update_transform()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         color = QColor(self.ann.color)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -138,9 +206,15 @@ class TextAnnotationItem(pg.GraphicsObject):
             painter.setBrush(color)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawEllipse(QPointF(0.0, 0.0), 3.0, 3.0)
-        painter.setFont(self.font)
+        flags = int(Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextDontClip)
         painter.setPen(color)
-        painter.drawText(self.text_rect, int(Qt.AlignmentFlag.AlignLeft), self.text)
+        if self.text:
+            painter.setFont(self.font)
+            painter.drawText(self.text_rect, flags, self.text)
+        if self.coords_line:
+            painter.setFont(self.coords_font)
+            painter.setPen(QColor(90, 90, 90))
+            painter.drawText(self.coords_rect, flags, self.coords_line)
 
     def mouseDragEvent(self, ev) -> None:
         if self.ann.locked or ev.button() != Qt.MouseButton.LeftButton:
@@ -154,6 +228,8 @@ class TextAnnotationItem(pg.GraphicsObject):
             self.hub.selected.emit(self.ann.id)
         pos = point + self._drag_offset
         self.setPos(pos)
+        if self.coords_line:
+            self._layout(pos.x(), pos.y())
         if ev.isFinish():
             self.hub.moved.emit(self.ann.id, pos.x(), pos.y(), self.ann.x2)
 
@@ -249,6 +325,38 @@ ITEM_CLASSES: dict[str, type] = {
 }
 
 
+def _axis_unit(plot: PlotWidget, subplot: int, axis_id: str) -> str:
+    """Unit of a Y axis: its configured unit, else the unit of its first curve's series."""
+    axis = plot.axis_config(subplot, axis_id)
+    if axis is not None and axis.unit:
+        return axis.unit
+    for curve in plot.config.subplots[subplot].curves:
+        if curve.axis_id == axis_id:
+            series = plot.session.get_series(curve.series_id)
+            if series is not None and series.unit:
+                return series.unit
+    return ""
+
+
+def _coords_text(plot: PlotWidget, subplot: int, axis_id: str, x: float, y: float) -> str:
+    """``x = … s   y = … rpm`` for a point of ``subplot`` (date/time when X is absolute)."""
+    x_cfg = plot.config.x_axis
+    if x_cfg.x_mode == "absolute" and math.isfinite(x):
+        stamp = datetime.fromtimestamp(x, tz=UTC).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        x_text = f"x = {stamp}"
+    else:
+        x_unit = x_cfg.unit
+        if not x_unit and x_cfg.x_mode == "series" and x_cfg.x_series_id:
+            series = plot.session.get_series(x_cfg.x_series_id)
+            x_unit = series.unit if series is not None else ""
+        elif not x_unit and x_cfg.x_mode == "relative":
+            x_unit = "s"
+        x_text = f"x = {format_number(x)}" + (f" {x_unit}" if x_unit else "")
+    y_unit = _axis_unit(plot, subplot, axis_id)
+    y_text = f"y = {format_number(y)}" + (f" {y_unit}" if y_unit else "")
+    return f"{x_text}   {y_text}"
+
+
 class AnnotationLayer:
     """Annotation items of one graph."""
 
@@ -288,7 +396,13 @@ class AnnotationLayer:
     def _create(self, ann: Annotation, subplot: int) -> None:
         sub = self.plot.subplots[subplot]
         view = sub.view_for_axis(ann.axis_id) if ann.kind in ("text", "hline") else sub.view_box
-        item = ITEM_CLASSES[ann.kind](ann, self.hub)
+        item: pg.GraphicsObject
+        if ann.kind == "text":
+            item = TextAnnotationItem(
+                ann, self.hub, partial(_coords_text, self.plot, subplot, ann.axis_id)
+            )
+        else:
+            item = ITEM_CLASSES[ann.kind](ann, self.hub)
         items: list[pg.GraphicsObject] = [item]
         for it in items:
             it.setZValue(ANNOTATION_Z)

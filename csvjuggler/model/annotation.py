@@ -38,7 +38,9 @@ class Annotation:
     opacity: float = 1.0
     locked: bool = False
     arrow: bool = False
-    """Text only: draw an arrow from the text to the anchor point."""
+    """Text only: the bubble has a tail pointing to the anchor point."""
+    show_coords: bool = True
+    """Text only: show the anchor point coordinates in the bubble."""
     link_all: bool = False
     """Vertical line only: shown on every graph of the same X sync group."""
     axis_id: str = "y0"

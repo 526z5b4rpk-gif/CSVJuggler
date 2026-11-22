@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pyqtgraph as pg
 import pytest
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtTest import QTest
 
 from csvjuggler.main_window import MainWindow
@@ -204,3 +204,42 @@ def test_text_bubble_with_pointer(window: MainWindow) -> None:
     assert len(_layer(window).items_for(ann.id)) == 1  # tail drawn by the bubble itself
     assert item.box.left() > 0 and item.box.bottom() < 0  # bubble above-right of the point
     assert item.shape().contains(QPointF(1.0, -1.0))  # the tail reaches the point
+
+
+def test_text_bubble_shows_point_coordinates(window: MainWindow) -> None:
+    dock = window.plot_docks[0]
+    m = window.annotations
+    ann = m.create("text", dock.dock_id, dock.plot, 0, 0.25, 12.5, "pic")
+    item = _layer(window).items_for(ann.id)[0]
+    assert isinstance(item, TextAnnotationItem)
+    assert item.coords_line.startswith("x = 0.25 s") and "y = 12.5" in item.coords_line
+    m.move(ann.id, 0.5, 3.0, 0.0)
+    item = _layer(window).items_for(ann.id)[0]
+    assert item.coords_line.startswith("x = 0.5 s") and "y = 3" in item.coords_line
+    stored = window.session.annotations.get(ann.id)
+    assert stored is not None
+    stored.show_coords = False
+    window.session.annotations.update(stored)
+    assert _layer(window).items_for(ann.id)[0].coords_line == ""
+
+
+def test_text_bubble_can_be_dragged_with_the_mouse(window: MainWindow, qtbot) -> None:
+    dock = window.plot_docks[0]
+    view = dock.plot.subplots[0].view_box
+    (x0, x1), (y0, y1) = view.viewRange()
+    ann = window.annotations.create(
+        "text", dock.dock_id, dock.plot, 0, (x0 + x1) / 2, (y0 + y1) / 2, "pic"
+    )
+    item = _layer(window).items_for(ann.id)[0]
+    start = dock.plot.mapFromScene(item.mapToScene(item.box.center()))
+    assert item in dock.plot.scene().items(item.mapToScene(item.box.center()))
+    viewport = dock.plot.viewport()
+    QTest.mousePress(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+    for step in range(1, 11):
+        QTest.mouseMove(viewport, start + QPoint(8 * step, 0))
+        qtbot.wait(1)
+    end = start + QPoint(80, 0)
+    QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, end)
+    stored = window.session.annotations.get(ann.id)
+    assert stored is not None and stored.x > (x0 + x1) / 2
+    assert view.viewRange()[0] == pytest.approx([x0, x1])  # the view did not pan

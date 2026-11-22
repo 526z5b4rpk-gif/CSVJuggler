@@ -221,6 +221,7 @@ class Msg:
     ANN_LBL_OPACITY = "Opacité :"
     ANN_LBL_LOCKED = "Verrouillée (non déplaçable)"
     ANN_LBL_ARROW = "Bulle avec pointeur vers le point"
+    ANN_LBL_SHOW_COORDS = "Afficher les coordonnées du point"
     ANN_LBL_LINK_ALL = "Afficher sur tous les graphes synchronisés"
     ANN_LBL_X = "X :"
     ANN_LBL_Y = "Y :"

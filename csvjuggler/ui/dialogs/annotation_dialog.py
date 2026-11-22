@@ -53,6 +53,8 @@ class AnnotationDialog(QDialog):
         self.locked_check.setChecked(ann.locked)
         self.arrow_check = QCheckBox(tr(Msg.ANN_LBL_ARROW))
         self.arrow_check.setChecked(ann.arrow)
+        self.coords_check = QCheckBox(tr(Msg.ANN_LBL_SHOW_COORDS))
+        self.coords_check.setChecked(ann.show_coords)
         self.link_check = QCheckBox(tr(Msg.ANN_LBL_LINK_ALL))
         self.link_check.setChecked(ann.link_all)
         self.x_spin = _spin(-1e300, 1e300, ann.x, decimals=9)
@@ -72,6 +74,7 @@ class AnnotationDialog(QDialog):
             form.addRow(tr(Msg.ANN_LBL_X2), self.x2_spin)
         if ann.kind == "text":
             form.addRow(self.arrow_check)
+            form.addRow(self.coords_check)
         if ann.kind == "vline":
             form.addRow(self.link_check)
         form.addRow(self.locked_check)
@@ -94,6 +97,7 @@ class AnnotationDialog(QDialog):
         a.opacity = self.opacity_spin.value()
         a.locked = self.locked_check.isChecked()
         a.arrow = self.arrow_check.isChecked()
+        a.show_coords = self.coords_check.isChecked()
         a.link_all = self.link_check.isChecked()
         a.x, a.y, a.x2 = self.x_spin.value(), self.y_spin.value(), self.x2_spin.value()
         if a.kind == "region" and a.x2 < a.x:
