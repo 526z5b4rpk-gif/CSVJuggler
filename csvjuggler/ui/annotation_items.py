@@ -16,8 +16,8 @@ from collections.abc import Callable
 from functools import partial
 
 import pyqtgraph as pg
-from PySide6.QtCore import QObject, QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtCore import QObject, QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QMenu, QWidget
 
 from csvjuggler.i18n import Msg, tr
@@ -68,28 +68,79 @@ def _handle_click(item: pg.GraphicsObject, ann: Annotation, hub: AnnotationHub, 
     return False
 
 
-class TextAnnotationItem(pg.TextItem):
-    """Text anchored at (x, y), draggable unless locked, optional arrow to the point."""
+class TextAnnotationItem(pg.GraphicsObject):
+    """Text in a rounded bubble anchored at (x, y), draggable unless locked.
+
+    With ``ann.arrow`` the bubble sits above-right of the point and a tail points to it
+    (a small dot marks the point); otherwise the bubble's bottom-left corner is the point.
+    Drawn in pixels (ignores the view scale), so it keeps its size when zooming.
+    """
+
+    PADDING = (8.0, 5.0)
+    RADIUS = 6.0
+    TAIL_OFFSET = QPointF(14.0, -22.0)
+    """Bubble bottom-left corner relative to the point, when it has a tail."""
+    TAIL_BASE = (8.0, 20.0)
+    """Tail base along the bubble's bottom edge, from its left side."""
+    SHADOW = QPointF(2.0, 2.0)
 
     def __init__(self, ann: Annotation, hub: AnnotationHub) -> None:
-        anchor = (-0.2, 2.2) if ann.arrow else (0, 1)
-        super().__init__(ann.text or " ", color=ann.color, anchor=anchor, fill=_fill(ann))
+        super().__init__()
         self.ann, self.hub = ann, hub
-        self.setFont(_font(ann))
+        self.setFlag(self.GraphicsItemFlag.ItemIgnoresTransformations)
         self.setPos(ann.x, ann.y)
         self.setOpacity(ann.opacity)
-        self.arrow: pg.ArrowItem | None = None
+        self.font = _font(ann)
+        self.text = ann.text or " "
+        metrics = QFontMetricsF(self.font)
+        text_rect = metrics.boundingRect(
+            QRectF(0, 0, 10000, 10000), int(Qt.AlignmentFlag.AlignLeft), self.text
+        )
+        pad_x, pad_y = self.PADDING
+        width, height = text_rect.width() + 2 * pad_x, text_rect.height() + 2 * pad_y
+        origin = self.TAIL_OFFSET if ann.arrow else QPointF(0.0, 0.0)
+        self.box = QRectF(origin.x(), origin.y() - height, width, height)
+        self.text_rect = self.box.adjusted(pad_x, pad_y, -pad_x, -pad_y)
+        path = QPainterPath()
+        path.addRoundedRect(self.box, self.RADIUS, self.RADIUS)
         if ann.arrow:
-            self.arrow = pg.ArrowItem(
-                pos=(ann.x, ann.y),
-                angle=-45,
-                tailLen=18,
-                headLen=10,
-                pen=pg.mkPen(ann.color),
-                brush=pg.mkBrush(ann.color),
-            )
-            self.arrow.setOpacity(ann.opacity)
+            base0, base1 = self.TAIL_BASE
+            tail = QPainterPath(QPointF(0.0, 0.0))
+            tail.lineTo(self.box.left() + base0, self.box.bottom() - 1)
+            tail.lineTo(self.box.left() + base1, self.box.bottom() - 1)
+            tail.closeSubpath()
+            path = path.united(tail)
+        self.path = path.simplified()
+        self._bounds = self.path.boundingRect().adjusted(
+            -3, -3, 3 + self.SHADOW.x(), 3 + self.SHADOW.y()
+        )
         self._drag_offset = QPointF()
+
+    def boundingRect(self) -> QRectF:
+        return self._bounds
+
+    def shape(self) -> QPainterPath:
+        return self.path
+
+    def paint(self, painter: QPainter, *_args: object) -> None:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor(self.ann.color)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 40))
+        painter.drawPath(self.path.translated(self.SHADOW))
+        background = QColor(self.ann.text_background or "#ffffff")
+        if not self.ann.text_background:
+            background.setAlpha(0)
+        painter.setBrush(background)
+        painter.setPen(QPen(color, 1.5))
+        painter.drawPath(self.path)
+        if self.ann.arrow:
+            painter.setBrush(color)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QPointF(0.0, 0.0), 3.0, 3.0)
+        painter.setFont(self.font)
+        painter.setPen(color)
+        painter.drawText(self.text_rect, int(Qt.AlignmentFlag.AlignLeft), self.text)
 
     def mouseDragEvent(self, ev) -> None:
         if self.ann.locked or ev.button() != Qt.MouseButton.LeftButton:
@@ -103,8 +154,6 @@ class TextAnnotationItem(pg.TextItem):
             self.hub.selected.emit(self.ann.id)
         pos = point + self._drag_offset
         self.setPos(pos)
-        if self.arrow is not None:
-            self.arrow.setPos(pos)
         if ev.isFinish():
             self.hub.moved.emit(self.ann.id, pos.x(), pos.y(), self.ann.x2)
 
@@ -241,8 +290,6 @@ class AnnotationLayer:
         view = sub.view_for_axis(ann.axis_id) if ann.kind in ("text", "hline") else sub.view_box
         item = ITEM_CLASSES[ann.kind](ann, self.hub)
         items: list[pg.GraphicsObject] = [item]
-        if isinstance(item, TextAnnotationItem) and item.arrow is not None:
-            items.append(item.arrow)
         for it in items:
             it.setZValue(ANNOTATION_Z)
             view.addItem(it, ignoreBounds=True)

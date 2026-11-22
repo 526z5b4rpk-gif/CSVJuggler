@@ -185,3 +185,22 @@ def test_text_annotation_hline_on_secondary_axis(window: MainWindow) -> None:
     item = _layer(window).items_for(ann.id)[0]
     assert item.getViewBox() is plot.subplots[0].view_for_axis("y1")
     assert isinstance(item, pg.InfiniteLine)
+
+
+def test_text_bubble_with_pointer(window: MainWindow) -> None:
+    dock = window.plot_docks[0]
+    m = window.annotations
+    ann = m.create("text", dock.dock_id, dock.plot, 0, 0.1, 10.0, "pic\nsecond")
+    item = _layer(window).items_for(ann.id)[0]
+    assert isinstance(item, TextAnnotationItem)
+    # No pointer: the bubble's bottom-left corner is the anchor point.
+    assert item.box.bottomLeft() == QPointF(0.0, 0.0)
+    assert item.box.height() > 2 * item.PADDING[1]  # two lines of text
+    stored = window.session.annotations.get(ann.id)
+    assert stored is not None
+    stored.arrow = True
+    window.session.annotations.update(stored)
+    item = _layer(window).items_for(ann.id)[0]
+    assert len(_layer(window).items_for(ann.id)) == 1  # tail drawn by the bubble itself
+    assert item.box.left() > 0 and item.box.bottom() < 0  # bubble above-right of the point
+    assert item.shape().contains(QPointF(1.0, -1.0))  # the tail reaches the point
