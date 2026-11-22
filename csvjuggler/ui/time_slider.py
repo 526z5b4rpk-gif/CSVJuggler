@@ -35,7 +35,7 @@ class TimeSliderBar(QWidget):
 
         self.show_check = QCheckBox(tr(Msg.SLIDER_SHOW))
         self.show_check.setToolTip(tr(Msg.SLIDER_SHOW_TIP))
-        self.play_button = QToolButton()
+        self.play_button = QToolButton(self)
         self.play_button.setCheckable(True)
         self.play_button.setText("▶")
         self.play_button.setToolTip(tr(Msg.SLIDER_PLAY_TIP))

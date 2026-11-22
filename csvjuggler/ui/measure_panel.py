@@ -53,7 +53,7 @@ class MeasurePanel(QWidget):
         self.table.setHorizontalHeaderLabels([tr(h) for h in HEADERS])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        copy_button = QPushButton(tr(Msg.MEASURE_COPY))
+        copy_button = QPushButton(tr(Msg.MEASURE_COPY), self)
         copy_button.clicked.connect(self.copy_tsv)
         top = QHBoxLayout()
         top.addWidget(self.cursor_label, 1)

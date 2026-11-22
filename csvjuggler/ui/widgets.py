@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QColorDialog, QPushButton, QWidget
+from PySide6.QtWidgets import QColorDialog, QDialog, QPushButton, QWidget
 
 
 class ColorButton(QPushButton):
@@ -42,3 +42,17 @@ class ColorButton(QPushButton):
         color = QColorDialog.getColor(initial, self)
         if color.isValid():
             self.set_color(color.name())
+
+
+class DisposableDialog(QDialog):
+    """Modal dialog destroyed once :meth:`exec` returns.
+
+    Dialogs are created with the main window as parent; without this they would pile up
+    under it until the application quits. The deletion is deferred, so the caller can still
+    read the dialog's values right after ``exec()``.
+    """
+
+    def exec(self) -> int:
+        result = super().exec()
+        self.deleteLater()
+        return result

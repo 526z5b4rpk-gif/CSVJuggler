@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 from csvjuggler.i18n import Msg, tr
 from csvjuggler.model.plot_config import X_AXIS_ID, AxisConfig, PlotConfig
-from csvjuggler.ui.widgets import ColorButton
+from csvjuggler.ui.widgets import ColorButton, DisposableDialog
 
 LEGEND_CHOICES = (
     (Msg.LEGEND_TOP_LEFT, "top-left"),
@@ -94,7 +94,7 @@ class AxisSettingsWidget(QWidget):
         self.auto_check.setChecked(axis.auto_range)
         self.min_spin = _spin(-1e300, 1e300, axis.min)
         self.max_spin = _spin(-1e300, 1e300, axis.max)
-        auto_once_button = QPushButton(tr(Msg.LBL_AUTO_ONCE))
+        auto_once_button = QPushButton(tr(Msg.LBL_AUTO_ONCE), self)
         auto_once_button.clicked.connect(self._on_auto_once)
         auto_once_button.setEnabled(auto_once is not None)
         range_row = QHBoxLayout()
@@ -125,7 +125,7 @@ class AxisSettingsWidget(QWidget):
         form.addRow(self.si_check)
 
         self.color_button = ColorButton(axis.color, allow_none=True)
-        reset = QPushButton(tr(Msg.AUTO))
+        reset = QPushButton(tr(Msg.AUTO), self)
         reset.clicked.connect(lambda: self.color_button.set_color(None))
         color_row = QHBoxLayout()
         color_row.addWidget(self.color_button)
@@ -174,7 +174,7 @@ def _buttons(dialog: QDialog) -> QDialogButtonBox:
     return buttons
 
 
-class AxisSettingsDialog(QDialog):
+class AxisSettingsDialog(DisposableDialog):
     def __init__(
         self,
         axis: AxisConfig,
@@ -194,7 +194,7 @@ class AxisSettingsDialog(QDialog):
         return self.editor.axis()
 
 
-class PlotSettingsDialog(QDialog):
+class PlotSettingsDialog(DisposableDialog):
     """Edits a copy of a :class:`PlotConfig`; :meth:`config` returns the result."""
 
     def __init__(

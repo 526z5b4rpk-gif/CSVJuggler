@@ -10,7 +10,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
     QDialogButtonBox,
     QFormLayout,
     QGroupBox,
@@ -28,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from csvjuggler.data.importer import CsvImportError, ImportPreview, ImportSettings, analyze
 from csvjuggler.i18n import Msg, tr
+from csvjuggler.ui.widgets import DisposableDialog
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ PREVIEW_LINES = 40
 ENCODINGS = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
 
 
-class ImportDialog(QDialog):
+class ImportDialog(DisposableDialog):
     def __init__(
         self, path: str | Path, alias: str, preview: ImportPreview, parent: QWidget | None = None
     ) -> None:

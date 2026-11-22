@@ -7,7 +7,6 @@ import string
 
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
     QDialogButtonBox,
     QFormLayout,
     QHeaderView,
@@ -23,9 +22,10 @@ from PySide6.QtWidgets import (
 from csvjuggler.data.derived import DerivedSeriesConfig, FormulaError
 from csvjuggler.i18n import Msg, tr
 from csvjuggler.model.session import Session
+from csvjuggler.ui.widgets import DisposableDialog
 
 
-class DerivedDialog(QDialog):
+class DerivedDialog(DisposableDialog):
     def __init__(
         self,
         session: Session,
@@ -55,7 +55,7 @@ class DerivedDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         for var, series_id in config.variables.items():
             self.add_variable(var, series_id)
-        add_button = QPushButton(tr(Msg.DERIVED_ADD_VAR))
+        add_button = QPushButton(tr(Msg.DERIVED_ADD_VAR), self)
         add_button.clicked.connect(lambda: self.add_variable())
         self.error_label = QLabel()
         self.error_label.setStyleSheet("color: #c62828")

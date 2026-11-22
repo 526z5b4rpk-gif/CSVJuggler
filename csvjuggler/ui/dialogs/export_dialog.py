@@ -5,7 +5,6 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
     QDialogButtonBox,
     QFormLayout,
     QGroupBox,
@@ -17,11 +16,12 @@ from PySide6.QtWidgets import (
 
 from csvjuggler.data.export import CsvExportOptions
 from csvjuggler.i18n import Msg, tr
+from csvjuggler.ui.widgets import DisposableDialog
 
 SERIES_ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
-class ExportCsvDialog(QDialog):
+class ExportCsvDialog(DisposableDialog):
     """``ranges``: available ``(label, x0, x1)``; ``series``: ``(label, id, checked)``."""
 
     def __init__(

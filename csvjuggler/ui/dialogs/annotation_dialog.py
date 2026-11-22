@@ -6,7 +6,6 @@ import copy
 
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDialog,
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
@@ -20,7 +19,7 @@ from PySide6.QtWidgets import (
 from csvjuggler.i18n import Msg, tr
 from csvjuggler.model.annotation import Annotation
 from csvjuggler.ui.dialogs.plot_settings_dialog import _spin
-from csvjuggler.ui.widgets import ColorButton
+from csvjuggler.ui.widgets import ColorButton, DisposableDialog
 
 KIND_NAMES = {
     "text": Msg.ANN_TEXT,
@@ -31,7 +30,7 @@ KIND_NAMES = {
 }
 
 
-class AnnotationDialog(QDialog):
+class AnnotationDialog(DisposableDialog):
     def __init__(self, ann: Annotation, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"{tr(Msg.ANN_DIALOG_TITLE)} — {tr(KIND_NAMES[ann.kind])}")
@@ -43,7 +42,7 @@ class AnnotationDialog(QDialog):
         self.font_spin.setRange(5, 72)
         self.font_spin.setValue(ann.font_size)
         self.background_button = ColorButton(ann.text_background, allow_none=True)
-        no_bg = QPushButton(tr(Msg.ANN_NO_BACKGROUND))
+        no_bg = QPushButton(tr(Msg.ANN_NO_BACKGROUND), self)
         no_bg.clicked.connect(lambda: self.background_button.set_color(None))
         bg_row = QHBoxLayout()
         bg_row.addWidget(self.background_button)

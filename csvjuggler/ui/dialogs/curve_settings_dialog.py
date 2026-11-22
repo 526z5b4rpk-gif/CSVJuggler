@@ -6,7 +6,6 @@ import copy
 
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDialog,
     QDialogButtonBox,
     QFormLayout,
     QLineEdit,
@@ -17,7 +16,7 @@ from PySide6.QtWidgets import (
 from csvjuggler.i18n import Msg, tr
 from csvjuggler.model.plot_config import CurveConfig
 from csvjuggler.ui.dialogs.plot_settings_dialog import _combo, _spin
-from csvjuggler.ui.widgets import ColorButton
+from csvjuggler.ui.widgets import ColorButton, DisposableDialog
 
 STYLE_CHOICES = ((Msg.STYLE_SOLID, "solid"), (Msg.STYLE_DASH, "dash"), (Msg.STYLE_DOT, "dot"))
 MARKER_CHOICES = (
@@ -29,7 +28,7 @@ MARKER_CHOICES = (
 MODE_CHOICES = ((Msg.MODE_LINE, "line"), (Msg.MODE_STEP, "step"), (Msg.MODE_POINTS, "points"))
 
 
-class CurveSettingsDialog(QDialog):
+class CurveSettingsDialog(DisposableDialog):
     def __init__(
         self, curve: CurveConfig, series_label: str, parent: QWidget | None = None
     ) -> None:
