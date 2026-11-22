@@ -213,6 +213,8 @@ class Msg:
     # Annotations
     MENU_ADD_ANNOTATION = "Ajouter une annotation"
     ANN_TEXT = "Texte"
+    ANN_BUBBLE = "Bulle sur une courbe"
+    ANN_BUBBLE_ON = "Bulle sur « {name} »"
     ANN_VLINE = "Ligne verticale (événement)"
     ANN_HLINE = "Ligne horizontale (seuil)"
     ANN_REGION = "Région X"

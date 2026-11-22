@@ -24,6 +24,7 @@ from csvjuggler.ui.widgets import ColorButton
 
 KIND_NAMES = {
     "text": Msg.ANN_TEXT,
+    "bubble": Msg.ANN_BUBBLE,
     "vline": Msg.ANN_VLINE,
     "hline": Msg.ANN_HLINE,
     "region": Msg.ANN_REGION,
@@ -74,6 +75,7 @@ class AnnotationDialog(QDialog):
             form.addRow(tr(Msg.ANN_LBL_X2), self.x2_spin)
         if ann.kind == "text":
             form.addRow(self.arrow_check)
+        if ann.kind in ("text", "bubble"):
             form.addRow(self.coords_check)
         if ann.kind == "vline":
             form.addRow(self.link_check)

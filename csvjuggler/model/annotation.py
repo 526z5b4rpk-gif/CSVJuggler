@@ -1,4 +1,4 @@
-"""Annotations: text, vertical line, horizontal line, X region.
+"""Annotations: text, bubble attached to a curve, vertical line, horizontal line, X region.
 
 X coordinates are stored in the time unit of the series (seconds after import scaling),
 never in pixels. Annotations are attached to a dataset (alias + file path) and are saved
@@ -19,7 +19,7 @@ from PySide6.QtCore import QObject, Signal
 
 log = logging.getLogger(__name__)
 
-AnnotationKind = Literal["text", "vline", "hline", "region"]
+AnnotationKind = Literal["text", "bubble", "vline", "hline", "region"]
 COMPANION_SUFFIX = ".annotations.json"
 COMPANION_VERSION = 1
 
@@ -40,7 +40,13 @@ class Annotation:
     arrow: bool = False
     """Text only: the bubble has a tail pointing to the anchor point."""
     show_coords: bool = True
-    """Text only: show the anchor point coordinates in the bubble."""
+    """Text and bubble: show the anchor point coordinates in the bubble."""
+    series_id: str = ""
+    """Bubble only: curve the point is attached to (its y is the curve value at ``x``)."""
+    offset_x: float = 24.0
+    offset_y: float = -36.0
+    """Bubble only: bottom-left corner of the bubble relative to its point, in pixels
+    (y downwards)."""
     link_all: bool = False
     """Vertical line only: shown on every graph of the same X sync group."""
     axis_id: str = "y0"

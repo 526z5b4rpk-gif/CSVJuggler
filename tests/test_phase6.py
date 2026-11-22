@@ -161,6 +161,7 @@ def test_context_menu_has_add_annotation(window: MainWindow) -> None:
     add = next(a.menu() for a in menu.actions() if a.text() == "Ajouter une annotation")
     assert [a.text() for a in add.actions()] == [
         "Texte",
+        "Bulle sur une courbe",
         "Ligne verticale (événement)",
         "Ligne horizontale (seuil)",
         "Région X",
