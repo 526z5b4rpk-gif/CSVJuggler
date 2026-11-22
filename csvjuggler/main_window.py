@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import itertools
+import json
 import logging
 import math
 from collections.abc import Callable, Iterable
@@ -113,6 +114,9 @@ def _render_svg(widget: QWidget, path: Path) -> None:
 
 
 class MainWindow(QMainWindow):
+    confirm_unsaved = True
+    """Ask to save a modified project before closing it (disabled in the test suite)."""
+
     def __init__(
         self,
         session: Session,
@@ -123,7 +127,11 @@ class MainWindow(QMainWindow):
         self.session = session
         self.settings = settings if settings is not None else QSettings()
         self.layout_path: Path | None = None
-        self.setWindowTitle(tr(Msg.APP_NAME))
+        self._saved_snapshot = ""
+        self._dirty_timer = QTimer(self)
+        self._dirty_timer.setSingleShot(True)
+        self._dirty_timer.setInterval(200)
+        self._dirty_timer.timeout.connect(self.update_modified)
         self.resize(1280, 800)
         self.setAcceptDrops(True)
 
@@ -187,11 +195,18 @@ class MainWindow(QMainWindow):
         session.datasets_changed.connect(self._update_time_range)
         session.series_data_changed.connect(self._update_time_range)
         self._build_menus()
+        for signal in (
+            session.datasets_changed,
+            session.series_names_changed,
+            session.annotations.annotations_changed,
+        ):
+            signal.connect(self.schedule_modified_check)
         session.series_data_changed.connect(self._on_series_data_changed)
         session.series_names_changed.connect(self._refresh_all_plots)
         session.datasets_changed.connect(self._refresh_all_plots)
         self.series_tree.context_menu_requested.connect(self._on_tree_menu)
         self.new_plot()
+        self.mark_saved()  # an empty window with its default graph is not a modification
 
     # -- menus ----------------------------------------------------------------------------
 
@@ -300,6 +315,8 @@ class MainWindow(QMainWindow):
         dock.plot.activated.connect(lambda d=dock: self._set_current(d))
         dock.closed.connect(self._on_dock_closed)
         dock.split_requested.connect(self.split_plot)
+        dock.plot.config_changed.connect(self.schedule_modified_check)
+        dock.title_changed.connect(self.schedule_modified_check)
         self.x_sync.register(dock.plot)
         dock.controller.menu_extensions.append(self._split_menu_extension(dock))
         dock.controller.menu_extensions.append(self.annotations.menu_extension(dock.dock_id))
@@ -318,6 +335,7 @@ class MainWindow(QMainWindow):
         dock.playhead.x = self.time_bar.position
         dock.playhead.set_enabled(self.time_bar.cursor_visible)
         self._set_current(dock)
+        self.schedule_modified_check()
         return dock
 
     # -- measurement ----------------------------------------------------------------------
@@ -422,6 +440,7 @@ class MainWindow(QMainWindow):
             self._set_current(self.plot_docks[-1] if self.plot_docks else None)
         self.plot_area.removeDockWidget(dock)
         dock.deleteLater()
+        self.schedule_modified_check()
 
     def close_all_plots(self) -> None:
         for dock in list(self.plot_docks):
@@ -718,7 +737,7 @@ class MainWindow(QMainWindow):
             if key == KEY_RECENT_FILES:
                 menu.addAction(path, partial(self.open_files, [path]))
             else:
-                menu.addAction(path, partial(self.load_layout, path))
+                menu.addAction(path, partial(self._open_recent_layout, path))
 
     # -- layouts --------------------------------------------------------------------------
 
@@ -742,8 +761,10 @@ class MainWindow(QMainWindow):
 
     def save_layout(self, path: str | Path) -> Path:
         path = with_layout_suffix(path)
-        self.current_layout().save(path)
+        layout = self.current_layout()
+        layout.save(path)
         self.layout_path = path
+        self.mark_saved(layout)
         self._push_recent(KEY_RECENT_LAYOUTS, path)
         self.settings.setValue(KEY_LAST_LAYOUT, str(path.resolve()))
         self.statusBar().showMessage(tr(Msg.STATUS_LAYOUT_SAVED).format(path=path), 5000)
@@ -781,6 +802,7 @@ class MainWindow(QMainWindow):
         self.session.annotations.merge(layout.annotations)
 
         self.layout_path = path
+        self.mark_saved()
         self._push_recent(KEY_RECENT_LAYOUTS, path)
         self.settings.setValue(KEY_LAST_LAYOUT, str(path.resolve()))
         missing = self.session.missing_series(layout.series_ids())
@@ -862,27 +884,31 @@ class MainWindow(QMainWindow):
         for dock in self.plot_docks:
             dock.plot.auto_range()
 
+    def _open_recent_layout(self, path: str) -> None:
+        if self.maybe_save():
+            self.load_layout(path)
+
     def _on_open_layout(self) -> None:
+        if not self.maybe_save():
+            return
         path, _ = QFileDialog.getOpenFileName(
             self, tr(Msg.LAYOUT_OPEN_TITLE), "", tr(Msg.LAYOUT_FILTER)
         )
         if path:
             self.load_layout(path)
 
-    def _on_save_layout(self) -> None:
+    def _on_save_layout(self) -> bool:
         if self.layout_path is None:
-            self._on_save_layout_as()
-        else:
-            self._save_layout_reporting(self.layout_path)
+            return self._on_save_layout_as()
+        return self._save_layout_reporting(self.layout_path)
 
-    def _on_save_layout_as(self) -> None:
+    def _on_save_layout_as(self) -> bool:
         path, _ = QFileDialog.getSaveFileName(
             self, tr(Msg.LAYOUT_SAVE_TITLE), "", tr(Msg.LAYOUT_FILTER)
         )
-        if path:
-            self._save_layout_reporting(Path(path))
+        return bool(path) and self._save_layout_reporting(Path(path))
 
-    def _save_layout_reporting(self, path: Path) -> None:
+    def _save_layout_reporting(self, path: Path) -> bool:
         try:
             self.save_layout(path)
         except OSError as exc:
@@ -891,6 +917,54 @@ class MainWindow(QMainWindow):
                 tr(Msg.LAYOUT_ERROR_TITLE),
                 tr(Msg.LAYOUT_SAVE_ERROR_TEXT).format(path=path, error=exc),
             )
+            return False
+        return True
+
+    # -- unsaved changes ------------------------------------------------------------------
+
+    def _snapshot(self, layout: Layout | None = None) -> str:
+        """What a save would write, minus the window geometry (moving docks is not a change)."""
+        data = (layout or self.current_layout()).to_dict()
+        data.pop("dock_state", None)
+        data.pop("window_state", None)
+        return json.dumps(data, sort_keys=True, default=str)
+
+    def mark_saved(self, layout: Layout | None = None) -> None:
+        self._dirty_timer.stop()
+        self._saved_snapshot = self._snapshot(layout)
+        self.update_modified()
+
+    def schedule_modified_check(self, *_args: object) -> None:
+        self._dirty_timer.start()
+
+    def is_modified(self) -> bool:
+        return self._snapshot() != self._saved_snapshot
+
+    def update_modified(self) -> None:
+        name = self.layout_path.name if self.layout_path else tr(Msg.UNTITLED_PROJECT)
+        self.setWindowTitle(tr(Msg.WINDOW_TITLE).format(name=name))
+        self.setWindowModified(self.is_modified())
+
+    def maybe_save(self) -> bool:
+        """Before closing the project: offer to save it. False = the user cancelled."""
+        if not self.confirm_unsaved or not self.is_modified():
+            return True
+        name = self.layout_path.name if self.layout_path else tr(Msg.UNTITLED_PROJECT)
+        buttons = (
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        answer = QMessageBox.question(
+            self,
+            tr(Msg.UNSAVED_TITLE),
+            tr(Msg.UNSAVED_TEXT).format(name=name),
+            buttons,
+            QMessageBox.StandardButton.Save,
+        )
+        if answer == QMessageBox.StandardButton.Save:
+            return self._on_save_layout()
+        return answer == QMessageBox.StandardButton.Discard
 
     def restore_last_layout(self) -> bool:
         """Startup: reload the last saved/opened layout, without dialogs."""
@@ -915,6 +989,9 @@ class MainWindow(QMainWindow):
             self.open_files(paths)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if not self.maybe_save():
+            event.ignore()
+            return
         log.debug("Main window closing")
         if self._companion_timer.isActive():
             self._companion_timer.stop()

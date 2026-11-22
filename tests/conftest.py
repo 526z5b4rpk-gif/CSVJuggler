@@ -23,3 +23,11 @@ def _no_companion_files_in_test_data():
     for path in leaked:
         path.unlink()
     assert not leaked, f"companion files written in tests/data: {leaked}"
+
+
+@pytest.fixture(autouse=True)
+def _no_unsaved_prompt(monkeypatch):
+    """Closing a window must not open the « save the project? » box (it would block)."""
+    from csvjuggler.main_window import MainWindow
+
+    monkeypatch.setattr(MainWindow, "confirm_unsaved", False)

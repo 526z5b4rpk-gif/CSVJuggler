@@ -81,9 +81,9 @@ pip install -e .
 L'environnement virtuel doit être activé (voir l'étape 3).
 
 ```bash
-csvjuggler                              # restaure le dernier layout utilisé
+csvjuggler                              # rouvre le dernier projet utilisé
 csvjuggler mon_fichier.csv              # ouvre un CSV (détection automatique)
-csvjuggler mon_fichier.csv -l essai.cjl.json   # applique un layout à ce CSV
+csvjuggler mon_fichier.csv -l essai.cjl.json   # applique un projet à ce CSV
 csvjuggler --debug mon_fichier.csv      # journal détaillé dans le terminal
 ```
 
@@ -126,7 +126,9 @@ Les règles du projet (architecture, conventions, décisions techniques) sont da
 - **Tracer une série** : glisser-la depuis l'arbre de gauche vers un graphe.
   La déposer sur la marge droite du graphe crée un axe Y secondaire.
 - **Recharger le fichier** : `Ctrl+R`.
-- **Layouts** : `Ctrl+S` pour enregistrer, `Ctrl+L` pour ouvrir (fichiers `*.cjl.json`).
+- **Projet** : `Ctrl+S` pour enregistrer, `Ctrl+L` pour ouvrir (fichiers `*.cjl.json`).
+  Un projet contient les fichiers CSV utilisés, les graphes, les annotations et les séries calculées.
+  Une `*` dans le titre signale des modifications non enregistrées ; à la fermeture, le logiciel propose de les enregistrer.
 - **Nouveau graphe** : `Ctrl+N`. Les boutons « Diviser ↔ / ↕ » partagent la zone en gardant la synchro X.
 - **Mesure** :
   - `T` active le tracker ;
