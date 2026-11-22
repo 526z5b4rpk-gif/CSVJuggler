@@ -95,13 +95,13 @@ def test_create_four_kinds(window: MainWindow) -> None:
     assert all(a.dataset_alias == "run" for a in window.session.annotations.all())
 
 
-def test_move_line_updates_model(window: MainWindow) -> None:
+def test_move_line_updates_model(window: MainWindow, qtbot) -> None:
     dock = window.plot_docks[0]
     ann = window.annotations.create("vline", dock.dock_id, dock.plot, 0, 0.2, 0.0)
     item = _layer(window).items_for(ann.id)[0]
     item.setValue(0.33)
     item.sigPositionChangeFinished.emit(item)
-    assert window.session.annotations.get(ann.id).x == pytest.approx(0.33)
+    qtbot.waitUntil(lambda: window.session.annotations.get(ann.id).x == pytest.approx(0.33))
 
 
 def test_locked_annotation_is_not_movable(window: MainWindow) -> None:
@@ -117,7 +117,7 @@ def test_delete_key_removes_selected(window: MainWindow, qtbot) -> None:
     layer = _layer(window)
     layer.hub.selected.emit(ann.id)
     QTest.keyClick(dock.plot, Qt.Key.Key_Delete)
-    assert window.session.annotations.get(ann.id) is None
+    qtbot.waitUntil(lambda: window.session.annotations.get(ann.id) is None)
     assert layer.items_for(ann.id) == []
 
 
@@ -233,6 +233,7 @@ def test_text_bubble_can_be_dragged_with_the_mouse(window: MainWindow, qtbot) ->
     item = _layer(window).items_for(ann.id)[0]
     start = dock.plot.mapFromScene(item.mapToScene(item.box.center()))
     assert item in dock.plot.scene().items(item.mapToScene(item.box.center()))
+    del item  # the layer must be the only owner: it rebuilds the item at the end of the drag
     viewport = dock.plot.viewport()
     QTest.mousePress(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
     for step in range(1, 11):
@@ -240,6 +241,5 @@ def test_text_bubble_can_be_dragged_with_the_mouse(window: MainWindow, qtbot) ->
         qtbot.wait(1)
     end = start + QPoint(80, 0)
     QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, end)
-    stored = window.session.annotations.get(ann.id)
-    assert stored is not None and stored.x > (x0 + x1) / 2
+    qtbot.waitUntil(lambda: window.session.annotations.get(ann.id).x > (x0 + x1) / 2)
     assert view.viewRange()[0] == pytest.approx([x0, x1])  # the view did not pan

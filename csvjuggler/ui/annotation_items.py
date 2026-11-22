@@ -451,10 +451,14 @@ class AnnotationManager(QObject):
         layer = AnnotationLayer(plot, hub)
         self._layers[id(plot)] = layer
         plot.annotation_layer = layer
-        hub.moved.connect(self.move)
-        hub.edit_requested.connect(self.edit)
-        hub.menu_requested.connect(self._show_menu)
-        hub.delete_requested.connect(self.delete)
+        # Queued: these slots change the store, which rebuilds (deletes) the item whose
+        # mouse handler emitted the signal. Deleting an item inside its own event handler
+        # crashes Qt (« shared QObject was deleted directly »), so wait for it to return.
+        queued = Qt.ConnectionType.QueuedConnection
+        hub.moved.connect(self.move, queued)
+        hub.edit_requested.connect(self.edit, queued)
+        hub.menu_requested.connect(self._show_menu, queued)
+        hub.delete_requested.connect(self.delete, queued)
         plot.config_changed.connect(self.refresh)
         self.refresh()
         return layer
