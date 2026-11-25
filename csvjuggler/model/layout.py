@@ -60,9 +60,19 @@ class DockConfig:
     dock_id: str
     title: str
     plot: PlotConfig = field(default_factory=PlotConfig)
+    detached: bool = False
+    """Shown in its own window (outside the main window)."""
+    window_geometry: str = ""
+    """``QWidget.saveGeometry()`` of that window, base64 (screen, size, maximised…)."""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"dock_id": self.dock_id, "title": self.title, "plot": self.plot.to_dict()}
+        return {
+            "dock_id": self.dock_id,
+            "title": self.title,
+            "plot": self.plot.to_dict(),
+            "detached": self.detached,
+            "window_geometry": self.window_geometry,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DockConfig:
@@ -70,6 +80,8 @@ class DockConfig:
             dock_id=str(data["dock_id"]),
             title=str(data.get("title", "")),
             plot=PlotConfig.from_dict(data.get("plot") or {}),
+            detached=bool(data.get("detached", False)),
+            window_geometry=str(data.get("window_geometry", "")),
         )
 
 

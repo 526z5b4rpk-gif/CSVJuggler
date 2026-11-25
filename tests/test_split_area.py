@@ -57,9 +57,9 @@ def test_split_of_unsynced_graph_creates_a_group(window: MainWindow) -> None:
 
 def test_split_from_toolbar_and_context_menu(window: MainWindow) -> None:
     first = window.plot_docks[0]
-    texts = [a.text() for a in first.toolbar.actions()]
+    texts = [a.text() for a in first.split_menu.actions()]  # « Diviser ▾ » of the toolbar
     assert "Diviser ↔" in texts and "Diviser ↕" in texts and "+ Sous-graphe" in texts
-    next(a for a in first.toolbar.actions() if a.text() == "Diviser ↕").trigger()
+    next(a for a in first.split_menu.actions() if a.text() == "Diviser ↕").trigger()
     assert len(window.plot_docks) == 2
     menu = first.controller.build_plot_menu(0, QPointF(10, 10))
     next(a for a in menu.actions() if a.text().startswith("Diviser la zone à droite")).trigger()

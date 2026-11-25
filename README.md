@@ -141,6 +141,8 @@ Les règles du projet (architecture, conventions, décisions techniques) sont da
   Glisser la bulle la déplace (le point reste accroché), glisser le point le fait glisser le long de la courbe.
 - **Boîte à outils** (panneau de droite, menu Fenêtre) : réglages du graphe courant et de ses courbes appliqués en direct, et un bouton par type d'annotation.
   L'« Écart Δ » mesure Δx, 1/Δx et Δy entre deux points accrochés à des courbes.
+- **Graphe dans sa propre fenêtre** : « Fenêtre ▾ » dans la barre du graphe → Détacher, Plein écran (F11, Échap pour sortir),
+  moitié gauche/droite de l'écran, ou un autre écran. Le bouton fermer de la fenêtre remet le graphe dans la fenêtre principale.
 - **Personnaliser** : clic droit sur un graphe, un axe, une courbe ou une annotation. Double-clic sur le fond pour les paramètres du graphe.
 
 ## Dépannage

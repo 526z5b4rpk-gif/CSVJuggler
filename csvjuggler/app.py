@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 from csvjuggler.i18n import Msg
 from csvjuggler.main_window import MainWindow
 from csvjuggler.model.session import Session
+from csvjuggler.ui.theme import apply_theme
 
 log = logging.getLogger("csvjuggler")
 
@@ -35,10 +36,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    app = QApplication.instance() or QApplication(sys.argv[:1])
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication(sys.argv[:1])
     app.setApplicationName(Msg.APP_NAME)
     app.setOrganizationName(Msg.APP_NAME)
     pg.setConfigOptions(antialias=False, background="w", foreground="k")
+    apply_theme(app)
 
     session = Session()
     window = MainWindow(session)

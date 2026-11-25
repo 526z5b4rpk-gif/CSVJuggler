@@ -152,6 +152,7 @@ class MainWindow(QMainWindow):
 
         self.series_tree = SeriesTree(session)
         tree_dock = QDockWidget(tr(Msg.DOCK_SERIES), self)
+        self.series_tree_dock = tree_dock
         tree_dock.setObjectName("series_tree_dock")
         tree_dock.setWidget(self.series_tree)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, tree_dock)
@@ -217,6 +218,7 @@ class MainWindow(QMainWindow):
         session.datasets_changed.connect(self._refresh_all_plots)
         self.series_tree.context_menu_requested.connect(self._on_tree_menu)
         self.new_plot()
+        self._initial_panel_sizes()
         self.mark_saved()  # an empty window with its default graph is not a modification
 
     # -- menus ----------------------------------------------------------------------------
@@ -269,6 +271,9 @@ class MainWindow(QMainWindow):
         for dock in (self.annotation_dock, self.measure_dock, self.toolbox_dock):
             window_menu.addAction(dock.toggleViewAction())
         window_menu.addAction(self.time_toolbar.toggleViewAction())
+        window_menu.addSeparator()
+        window_menu.addAction(tr(Msg.ACTION_DETACH_CURRENT), self.detach_current_plot)
+        window_menu.addAction(tr(Msg.ACTION_FULL_SCREEN_CURRENT), self.full_screen_current_plot)
 
         measure_menu = self.menuBar().addMenu(tr(Msg.MENU_MEASURE))
         self.tracker_action = QAction(tr(Msg.ACTION_TRACKER), self)
@@ -482,7 +487,7 @@ class MainWindow(QMainWindow):
 
     def close_all_plots(self) -> None:
         for dock in list(self.plot_docks):
-            dock.close()
+            dock.close_plot()
 
     def tile_plots(self) -> None:
         """Arrange all graphs in a grid (columns first)."""
@@ -788,7 +793,17 @@ class MainWindow(QMainWindow):
                 if ds.path is not None and ds.import_settings is not None
             ],
             docks=[
-                DockConfig(d.dock_id, d.windowTitle(), copy.deepcopy(d.plot.config))
+                DockConfig(
+                    d.dock_id,
+                    d.windowTitle(),
+                    copy.deepcopy(d.plot.config),
+                    detached=d.detached,
+                    window_geometry=(
+                        bytes(d.saveGeometry().toBase64().data()).decode("ascii")
+                        if d.detached
+                        else ""
+                    ),
+                )
                 for d in self.plot_docks
             ],
             dock_state=bytes(self.plot_area.saveState().toBase64().data()).decode("ascii"),
@@ -912,15 +927,42 @@ class MainWindow(QMainWindow):
 
     def _apply_layout_docks(self, layout: Layout) -> None:
         for dock in list(self.plot_docks):
-            dock.close()
+            dock.close_plot()
         for dock_cfg in layout.docks:
             self.new_plot(copy.deepcopy(dock_cfg.plot), dock_cfg.dock_id, dock_cfg.title)
         if layout.dock_state:
             self.plot_area.restoreState(QByteArray.fromBase64(layout.dock_state.encode("ascii")))
         if layout.window_state:
             self.restoreState(QByteArray.fromBase64(layout.window_state.encode("ascii")))
+        by_id = {d.dock_id: d for d in self.plot_docks}
+        for dock_cfg in layout.docks:
+            detached = by_id.get(dock_cfg.dock_id)
+            if detached is not None and dock_cfg.detached:
+                detached.detach()
+                if dock_cfg.window_geometry:
+                    detached.restoreGeometry(
+                        QByteArray.fromBase64(dock_cfg.window_geometry.encode("ascii"))
+                    )
         for dock in self.plot_docks:
             dock.plot.auto_range()
+
+    def _initial_panel_sizes(self) -> None:
+        """Side panels narrow, the measure panel short: most of the room for the graphs."""
+        self.resizeDocks(
+            [self.series_tree_dock, self.toolbox_dock], [250, 310], Qt.Orientation.Horizontal
+        )
+        self.resizeDocks([self.measure_dock], [170], Qt.Orientation.Vertical)
+        self.resizeDocks(
+            [self.series_tree_dock, self.annotation_dock], [380, 220], Qt.Orientation.Vertical
+        )
+
+    def detach_current_plot(self) -> None:
+        if self.current_dock is not None:
+            self.current_dock.detach()
+
+    def full_screen_current_plot(self) -> None:
+        if self.current_dock is not None:
+            self.current_dock.toggle_full_screen()
 
     def _open_recent_layout(self, path: str) -> None:
         if self.maybe_save():
@@ -965,6 +1007,8 @@ class MainWindow(QMainWindow):
         data = (layout or self.current_layout()).to_dict()
         data.pop("dock_state", None)
         data.pop("window_state", None)
+        for dock in data.get("docks", []):
+            dock.pop("window_geometry", None)  # moving a detached window is not a change
         return json.dumps(data, sort_keys=True, default=str)
 
     def mark_saved(self, layout: Layout | None = None) -> None:
@@ -1034,4 +1078,7 @@ class MainWindow(QMainWindow):
         if self._companion_timer.isActive():
             self._companion_timer.stop()
             self.session.save_companions()
+        for dock in self.plot_docks:
+            if dock.isWindow():
+                dock.hide()  # detached graphs close with the main window (else the app lives on)
         super().closeEvent(event)
