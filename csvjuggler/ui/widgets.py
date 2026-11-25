@@ -30,7 +30,10 @@ class ColorButton(QPushButton):
         self._color = color
         if color:
             text = "#000000" if QColor(color).lightness() > 128 else "#ffffff"
-            self.setStyleSheet(f"background-color: {color}; color: {text};")
+            self.setStyleSheet(
+                f"QPushButton {{ background-color: {color}; color: {text};"
+                " border: 1px solid rgba(0, 0, 0, 40); border-radius: 6px; padding: 5px 14px; }"
+            )
             self.setText(color)
         else:
             self.setStyleSheet("")

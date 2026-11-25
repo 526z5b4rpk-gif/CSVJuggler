@@ -14,6 +14,7 @@ from functools import partial
 from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
+    QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -72,17 +73,19 @@ class ToolboxPanel(QWidget):
         graph_page = QWidget(self)
         graph_layout = QVBoxLayout(graph_page)
         self.general = PlotGeneralWidget(PlotConfig(), graph_page)
+        _stack_labels(self.general)
         self.general.changed.connect(self._on_general_changed)
         graph_layout.addWidget(self.general)
-        buttons = QHBoxLayout()
+        buttons = QGridLayout()
         self.x_axis_button = QPushButton(tr(Msg.MENU_X_AXIS), graph_page)
         self.x_axis_button.clicked.connect(self._edit_x_axis)
         self.y_axis_button = QPushButton(tr(Msg.MENU_Y_AXIS), graph_page)
         self.y_axis_button.clicked.connect(self._edit_main_y_axis)
         self.all_settings_button = QPushButton(tr(Msg.TOOLBOX_ALL_SETTINGS), graph_page)
         self.all_settings_button.clicked.connect(self._edit_all)
-        for button in (self.x_axis_button, self.y_axis_button, self.all_settings_button):
-            buttons.addWidget(button)
+        buttons.addWidget(self.x_axis_button, 0, 0)
+        buttons.addWidget(self.y_axis_button, 0, 1)
+        buttons.addWidget(self.all_settings_button, 1, 0, 1, 2)
         graph_layout.addLayout(buttons)
         graph_layout.addStretch(1)
         self.sections.addItem(_scrolled(graph_page, self.sections), tr(Msg.TOOLBOX_GRAPH))
@@ -100,9 +103,10 @@ class ToolboxPanel(QWidget):
         self.curve_editor = CurveSettingsWidget(
             CurveConfig(series_id="", color="#000000"), "", curves_page
         )
+        _stack_labels(self.curve_editor)
         self.curve_editor.changed.connect(self._on_curve_edited)
         curves_layout.addWidget(self.curve_editor)
-        curve_buttons = QHBoxLayout()
+        curve_buttons = QVBoxLayout()
         self.curve_axis_button = QPushButton(tr(Msg.TOOLBOX_CURVE_AXIS), curves_page)
         self.curve_axis_button.clicked.connect(self._edit_curve_axis)
         self.remove_curve_button = QPushButton(tr(Msg.MENU_REMOVE_CURVE), curves_page)
@@ -333,6 +337,14 @@ class ToolboxPanel(QWidget):
         ann_id = self._selected_annotation_id()
         if ann_id:
             self.annotations.delete(ann_id)
+
+
+def _stack_labels(widget: QWidget) -> None:
+    """Labels above their field: the side panel is too narrow for label + field rows."""
+    layout = widget.layout()
+    if isinstance(layout, QFormLayout):
+        layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        layout.setVerticalSpacing(4)
 
 
 def _scrolled(page: QWidget, parent: QWidget) -> QScrollArea:

@@ -1,14 +1,16 @@
-"""Look of the application: Fusion style with a light palette, a light style sheet, an icon.
+"""Look of the application: Fusion style, light palette, modern style sheet, icon.
 
-The native Windows style looks dated and, with Windows' dark mode, would give dark panels
-around white graphs. Windows and Linux therefore use Fusion with a fixed light palette; macOS
-keeps its native style (only the small graph toolbars get the style sheet).
+The same look on every platform: Fusion with a fixed light palette (Windows' dark mode would
+otherwise give dark panels around white graphs) and a flat style sheet: toggle switches
+instead of check boxes, rounded fields and buttons, thin scroll bars. The switch and chevron
+drawings are SVG files of ``ui/assets`` (package data).
 """
 
 from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
@@ -27,60 +29,162 @@ from PySide6.QtWidgets import QApplication
 
 log = logging.getLogger(__name__)
 
-ACCENT = "#1f77b4"
+ACCENT = "#2f6fde"
 WINDOWS_APP_ID = "CsvJuggler.CsvJuggler"
+ASSETS = Path(__file__).parent / "assets"
 
-STYLE_SHEET = """
-QMainWindow::separator { background: #dde2e8; width: 4px; height: 4px; }
-QMainWindow::separator:hover { background: #9fb8d6; }
-QDockWidget::title {
-    background: #eceff3; padding: 4px 6px; border-bottom: 1px solid #d5dae1;
+STYLE_SHEET_TEMPLATE = """
+* { outline: none; }
+QMainWindow, QDialog { background: #f4f5f7; }
+QMainWindow::separator { background: #f4f5f7; width: 5px; height: 5px; }
+QMainWindow::separator:hover { background: #c9d6ec; }
+
+QDockWidget { font-weight: 600; color: #3b4450; }
+QDockWidget::title { background: #f4f5f7; padding: 6px 8px 4px 8px; text-align: left; }
+QDockWidget > QWidget { font-weight: normal; color: #1d232b; }
+
+QToolBar { background: transparent; border: none; spacing: 4px; padding: 3px 4px; }
+QToolBar QToolButton {
+    padding: 4px 10px; border: none; border-radius: 6px; color: #2b333d; background: transparent;
 }
-QToolBar { background: transparent; border: none; spacing: 2px; padding: 1px 2px; }
-QToolBar QToolButton { padding: 3px 7px; border: 1px solid transparent; border-radius: 4px; }
-QToolBar QToolButton:hover { background: #e4ecf6; border-color: #c6d6ea; }
+QToolBar QToolButton:hover { background: #e6ebf3; }
 QToolBar QToolButton:pressed, QToolBar QToolButton:checked {
-    background: #d3e2f4; border-color: #9fb8d6;
+    background: #dce7fb; color: #1f4fae;
 }
-QToolBar QToolButton::menu-indicator { subcontrol-position: right center; width: 0; }
+QToolBar QToolButton::menu-indicator { width: 0; }
+
 QPushButton {
-    padding: 4px 10px; border: 1px solid #c4cad3; border-radius: 4px; background: #fbfcfd;
+    padding: 5px 14px; border: 1px solid #d3d8df; border-radius: 6px; background: #ffffff;
+    color: #1d232b;
 }
-QPushButton:hover { background: #eef3f9; border-color: #9fb8d6; }
-QPushButton:pressed { background: #dfe8f3; }
-QPushButton:disabled { color: #9aa3ad; background: #f3f4f6; }
+QPushButton:hover { background: #f2f5fa; border-color: #b9c4d3; }
+QPushButton:pressed { background: #e5ebf5; }
+QPushButton:default { border-color: @ACCENT; }
+QPushButton:disabled { color: #a3abb5; background: #f4f5f7; border-color: #e1e4e8; }
+
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
-    padding: 2px 4px; border: 1px solid #c4cad3; border-radius: 3px; background: #ffffff;
+    padding: 3px 8px; border: 1px solid #d3d8df; border-radius: 6px; background: #ffffff;
+    selection-background-color: @ACCENT; min-height: 18px;
+}
+QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {
+    border-color: #b9c4d3;
 }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
-    border-color: #1f77b4;
+    border: 1px solid @ACCENT;
 }
+QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {
+    color: #a3abb5; background: #f4f5f7; border-color: #e1e4e8;
+}
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox::down-arrow { image: url(@ASSETS/chevron_down.svg); width: 12px; height: 12px; }
+QComboBox::down-arrow:disabled { image: url(@ASSETS/chevron_down_disabled.svg); }
+QComboBox QAbstractItemView {
+    border: 1px solid #d3d8df; border-radius: 6px; background: #ffffff; padding: 4px;
+    selection-background-color: #e6eefc; selection-color: #1d232b;
+}
+QSpinBox, QDoubleSpinBox { padding-right: 22px; }
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border; width: 20px; border: none; background: transparent;
+}
+QSpinBox::up-button, QDoubleSpinBox::up-button { subcontrol-position: top right; }
+QSpinBox::down-button, QDoubleSpinBox::down-button { subcontrol-position: bottom right; }
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+    background: #eef2f8; border-radius: 4px;
+}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+    image: url(@ASSETS/chevron_up.svg); width: 10px; height: 10px;
+}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+    image: url(@ASSETS/chevron_down.svg); width: 10px; height: 10px;
+}
+QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled {
+    image: url(@ASSETS/chevron_up_disabled.svg);
+}
+QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled {
+    image: url(@ASSETS/chevron_down_disabled.svg);
+}
+
+QCheckBox { spacing: 8px; }
+QCheckBox::indicator { width: 34px; height: 20px; }
+QCheckBox::indicator:unchecked { image: url(@ASSETS/switch_off.svg); }
+QCheckBox::indicator:unchecked:hover { image: url(@ASSETS/switch_off_hover.svg); }
+QCheckBox::indicator:unchecked:disabled { image: url(@ASSETS/switch_off_disabled.svg); }
+QCheckBox::indicator:checked { image: url(@ASSETS/switch_on.svg); }
+QCheckBox::indicator:checked:hover { image: url(@ASSETS/switch_on_hover.svg); }
+QCheckBox::indicator:checked:disabled { image: url(@ASSETS/switch_on_disabled.svg); }
+
+QGroupBox {
+    border: 1px solid #e1e4e8; border-radius: 8px; margin-top: 14px; padding: 10px 8px 8px 8px;
+    background: #ffffff;
+}
+QGroupBox::title {
+    subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #3b4450; font-weight: 600;
+}
+
 QToolBox::tab {
-    background: #eceff3; border: 1px solid #d5dae1; border-radius: 4px; padding: 4px 8px;
-    font-weight: 600;
+    background: transparent; border: none; border-radius: 6px; padding: 2px 8px;
+    min-height: 26px; font-weight: 600; color: #3b4450;
 }
-QToolBox::tab:selected { background: #dbe6f3; border-color: #9fb8d6; }
+QToolBox::tab:hover { background: #e9edf3; }
+QToolBox::tab:selected { background: #e6eefc; color: #1f4fae; }
+
+QTabWidget::pane { border: 1px solid #e1e4e8; border-radius: 8px; background: #ffffff; top: -1px; }
+QTabBar::tab {
+    padding: 6px 14px; border: none; border-bottom: 2px solid transparent; color: #5b6573;
+    background: transparent;
+}
+QTabBar::tab:selected { color: #1f4fae; border-bottom-color: @ACCENT; }
+QTabBar::tab:hover { color: #1d232b; }
+
+QTreeView, QListView, QListWidget, QTableView, QTableWidget {
+    border: 1px solid #e1e4e8; border-radius: 8px; background: #ffffff;
+    selection-background-color: #e6eefc; selection-color: #1d232b; gridline-color: #eef0f3;
+}
+QTreeView::item, QListWidget::item { padding: 3px 2px; border-radius: 4px; }
+QTreeView::item:hover, QListWidget::item:hover { background: #f2f5fa; }
+QTreeView::item:selected, QListWidget::item:selected { background: #e6eefc; color: #1d232b; }
 QHeaderView::section {
-    background: #eceff3; border: none; border-right: 1px solid #d5dae1;
-    border-bottom: 1px solid #d5dae1; padding: 3px 6px;
+    background: #ffffff; border: none; border-bottom: 1px solid #e1e4e8; padding: 5px 8px;
+    color: #5b6573; font-weight: 600;
 }
-QTreeView, QListWidget, QTableWidget { border: 1px solid #d5dae1; }
-QTreeView::item, QListWidget::item { padding: 2px 0; }
-QStatusBar { background: #f3f5f8; border-top: 1px solid #d5dae1; }
+QTableCornerButton::section { background: #ffffff; border: none; }
+
+QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px; }
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+    background: #c9cfd8; border-radius: 3px; min-height: 24px; min-width: 24px;
+}
+QScrollBar::handle:hover { background: #a9b2bf; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
+QMenu {
+    background: #ffffff; border: 1px solid #d3d8df; border-radius: 8px; padding: 4px;
+}
+QMenu::item { padding: 5px 22px 5px 22px; border-radius: 5px; }
+QMenu::item:selected { background: #e6eefc; color: #1d232b; }
+QMenu::item:disabled { color: #a3abb5; }
+QMenu::separator { height: 1px; background: #e8ebef; margin: 4px 8px; }
+
+QToolTip {
+    background: #2b333d; color: #ffffff; border: none; border-radius: 6px; padding: 5px 8px;
+}
+QStatusBar { background: #f4f5f7; color: #5b6573; }
+QStatusBar::item { border: none; }
 """
 
-MAC_STYLE_SHEET = """
-QToolBar { border: none; spacing: 2px; padding: 1px 2px; }
-QToolBar QToolButton { padding: 2px 6px; border-radius: 4px; }
-QToolBar QToolButton:hover { background: #e4ecf6; }
-QToolBar QToolButton:checked { background: #d3e2f4; }
-"""
+
+def style_sheet() -> str:
+    """The style sheet with the asset paths and accent colour filled in."""
+    return STYLE_SHEET_TEMPLATE.replace("@ASSETS", ASSETS.as_posix()).replace("@ACCENT", ACCENT)
 
 
 def light_palette() -> QPalette:
     palette = QPalette()
     colors = {
-        QPalette.ColorRole.Window: "#f5f6f8",
+        QPalette.ColorRole.Window: "#f4f5f7",
         QPalette.ColorRole.WindowText: "#1d232b",
         QPalette.ColorRole.Base: "#ffffff",
         QPalette.ColorRole.AlternateBase: "#eef1f5",
@@ -172,15 +276,17 @@ def app_icon() -> QIcon:
 
 def apply_theme(app: QApplication) -> None:
     app.setWindowIcon(app_icon())
-    if sys.platform == "darwin":
-        app.setStyleSheet(MAC_STYLE_SHEET)
-        return
     app.setStyle("Fusion")
     app.setPalette(light_palette())
     if sys.platform == "win32":
         app.setFont(QFont("Segoe UI", 9))
         _set_windows_app_id()
-    app.setStyleSheet(STYLE_SHEET)
+    missing = [
+        name for name in ("switch_on.svg", "chevron_down.svg") if not (ASSETS / name).is_file()
+    ]
+    if missing:
+        log.warning("Theme assets missing in %s: %s", ASSETS, ", ".join(missing))
+    app.setStyleSheet(style_sheet())
 
 
 def _set_windows_app_id() -> None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtGui import QPalette
 
 from csvjuggler.ui.theme import _icon_image, app_icon, light_palette
@@ -21,3 +23,16 @@ def test_light_palette_even_in_dark_mode(qtbot) -> None:
     palette = light_palette()
     assert palette.color(QPalette.ColorRole.Base).lightness() > 240
     assert palette.color(QPalette.ColorRole.Text).lightness() < 60
+
+
+def test_style_sheet_assets_exist() -> None:
+    import re
+
+    from csvjuggler.ui.theme import ASSETS, style_sheet
+
+    sheet = style_sheet()
+    assert "@ASSETS" not in sheet and "@ACCENT" not in sheet
+    paths = re.findall(r"url\(([^)]+)\)", sheet)
+    assert any(p.endswith("switch_on.svg") for p in paths)  # check boxes drawn as switches
+    for path in paths:
+        assert path.startswith(ASSETS.as_posix()) and Path(path).is_file(), path

@@ -23,6 +23,9 @@ csvjuggler = "csvjuggler.app:main"
 [tool.setuptools.packages.find]
 include = ["csvjuggler*"]
 
+[tool.setuptools.package-data]
+"csvjuggler.ui" = ["assets/*.svg"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
