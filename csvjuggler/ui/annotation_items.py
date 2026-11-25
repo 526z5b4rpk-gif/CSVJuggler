@@ -21,7 +21,16 @@ from functools import partial
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QObject, QPointF, QRectF, QSizeF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QTransform
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetricsF,
+    QPainter,
+    QPainterPath,
+    QPainterPathStroker,
+    QPen,
+    QTransform,
+)
 from PySide6.QtWidgets import QMenu, QWidget
 
 from csvjuggler.data.analysis import format_number
@@ -48,6 +57,8 @@ class AnnotationHub(QObject):
     selected = Signal(str)
     delete_requested = Signal(str)
     offset_changed = Signal(str, float, float)
+    delta_moved = Signal(str, str, float, str, float)
+    """Delta ``(id, series A, x A, series B, x B)`` after a point was dragged."""
     """Bubble ``(id, dx, dy)``: new position of the bubble relative to its point (pixels)."""
 
 
@@ -450,6 +461,235 @@ class RegionAnnotationItem(pg.LinearRegionItem):
             super().mouseClickEvent(ev)
 
 
+class DeltaAnnotationItem(pg.GraphicsObject):
+    """Δ between two curve points A and B: horizontal (Δx) and vertical (Δy) dimension lines.
+
+    Each point is attached to a curve (possibly two different ones) and is dragged along it;
+    released near another curve of the subplot, it snaps to that curve. The item is a child
+    of the subplot's main ViewBox itself (not of its scaled child group): its coordinates are
+    pixels, recomputed from the curves' views whenever a view range or size changes.
+    """
+
+    POINT_PICK_RADIUS = 8.0
+    POINT_RADIUS = 3.5
+    ARROW = 7.0
+    LABEL_GAP = 10.0
+    PADDING = (7.0, 4.0)
+    HIT_WIDTH = 8.0
+
+    def __init__(self, ann: Annotation, hub: AnnotationHub, plot: PlotWidget, subplot: int) -> None:
+        super().__init__()
+        self.ann, self.hub, self.plot, self.subplot = ann, hub, plot, subplot
+        self.points: dict[str, tuple[str, float]] = {
+            "A": (ann.series_id, ann.x),
+            "B": (ann.series_id_b or ann.series_id, ann.x2),
+        }
+        self.font = _font(ann)
+        self.setOpacity(ann.opacity)
+        self.label_lines: list[str] = []
+        self.values: dict[str, float] = {}
+        self._a = self._b = QPointF()
+        self._box = QRectF()
+        self._hit = QPainterPath()
+        self._bounds = QRectF()
+        self._views: list[pg.ViewBox] = []
+        self._dragging: str | None = None
+
+    # -- placement ------------------------------------------------------------------------
+
+    @property
+    def sub(self):
+        return self.plot.subplots[self.subplot]
+
+    def attach(self) -> None:
+        """Parent to the main view and follow every view the points depend on."""
+        main = self.sub.view_box
+        self.setParentItem(main)
+        self.setZValue(ANNOTATION_Z)
+        views = {id(main): main}
+        for series_id, _x in self.points.values():
+            curve = self.plot.config.subplots[self.subplot].curve(series_id)
+            if curve is not None:
+                view = self.sub.view_for_axis(curve.axis_id)
+                views[id(view)] = view
+        self._views = list(views.values())
+        for view in self._views:
+            view.sigRangeChanged.connect(self.relayout)
+            view.sigResized.connect(self.relayout)
+        self.relayout()
+
+    def detach(self) -> None:
+        for view in self._views:
+            for signal in (view.sigRangeChanged, view.sigResized):
+                with contextlib.suppress(RuntimeError, TypeError):
+                    signal.disconnect(self.relayout)
+        self._views = []
+        if self.scene() is not None:
+            self.scene().removeItem(self)
+
+    def _resolve(self, name: str) -> tuple[float, QPointF] | None:
+        """Data y and local (pixel) position of point ``name``; None if not drawable."""
+        series_id, x = self.points[name]
+        curve = self.plot.config.subplots[self.subplot].curve(series_id)
+        if curve is None or not curve.visible:
+            return None
+        y = _curve_y(self.plot, curve, x)
+        if not math.isfinite(y):
+            return None
+        scene = self.sub.view_for_axis(curve.axis_id).mapViewToScene(QPointF(x, y))
+        return y, self.mapFromScene(scene)
+
+    def relayout(self, *_args: object) -> None:
+        a, b = self._resolve("A"), self._resolve("B")
+        self.setVisible(a is not None and b is not None)
+        if a is None or b is None:
+            return
+        self.prepareGeometryChange()
+        (ya, self._a), (yb, self._b) = a, b
+        xa, xb = self.points["A"][1], self.points["B"][1]
+        self.values = {"xa": xa, "ya": ya, "xb": xb, "yb": yb}
+        self.label_lines = self._label_lines(xb - xa, ya, yb)
+        size = _text_size(self.font, "\n".join(self.label_lines))
+        pad_x, pad_y = self.PADDING
+        width, height = size.width() + 2 * pad_x, size.height() + 2 * pad_y
+        corner = QPointF(self._b.x(), self._a.y())
+        right = self._b.x() >= self._a.x()
+        left = corner.x() + self.LABEL_GAP if right else corner.x() - self.LABEL_GAP - width
+        top = (self._a.y() + self._b.y()) / 2 - height / 2
+        self._box = QRectF(left, top, width, height)
+
+        lines = QPainterPath(self._a)
+        lines.lineTo(corner)
+        lines.lineTo(self._b)
+        stroker = QPainterPathStroker()
+        stroker.setWidth(self.HIT_WIDTH)
+        hit = stroker.createStroke(lines)
+        for point in (self._a, self._b):
+            dot = QPainterPath()
+            dot.addEllipse(point, self.POINT_PICK_RADIUS, self.POINT_PICK_RADIUS)
+            hit = hit.united(dot)
+        box = QPainterPath()
+        box.addRect(self._box)
+        self._hit = hit.united(box)
+        self._bounds = self._hit.boundingRect().adjusted(-2, -2, 2, 2)
+        self.update()
+
+    def _label_lines(self, dx: float, ya: float, yb: float) -> list[str]:
+        x_unit = _x_unit(self.plot)
+        lines = [self.ann.text] if self.ann.text else []
+        lines.append(f"Δx = {format_number(dx)}" + (f" {x_unit}" if x_unit else ""))
+        if x_unit == "s" and dx != 0:
+            lines.append(f"1/Δx = {format_number(1 / abs(dx))} Hz")
+        unit_a, unit_b = (self._series_unit(self.points[n][0]) for n in ("A", "B"))
+        if unit_a == unit_b:
+            lines.append(f"Δy = {format_number(yb - ya)}" + (f" {unit_a}" if unit_a else ""))
+        else:
+            lines.append(f"y(A) = {format_number(ya)} {unit_a}".rstrip())
+            lines.append(f"y(B) = {format_number(yb)} {unit_b}".rstrip())
+        return lines
+
+    def _series_unit(self, series_id: str) -> str:
+        series = self.plot.session.get_series(series_id)
+        return series.unit if series is not None else ""
+
+    # -- painting -------------------------------------------------------------------------
+
+    def boundingRect(self) -> QRectF:
+        return self._bounds
+
+    def shape(self) -> QPainterPath:
+        return self._hit
+
+    def _arrow(self, painter: QPainter, tip: QPointF, tail: QPointF) -> None:
+        length = math.hypot(tip.x() - tail.x(), tip.y() - tail.y())
+        if length < 2.5 * self.ARROW:
+            return
+        ux, uy = (tip.x() - tail.x()) / length, (tip.y() - tail.y()) / length
+        base = QPointF(tip.x() - ux * self.ARROW, tip.y() - uy * self.ARROW)
+        normal = QPointF(-uy, ux) * (self.ARROW * 0.45)
+        head = QPainterPath(tip)
+        head.lineTo(base + normal)
+        head.lineTo(base - normal)
+        head.closeSubpath()
+        painter.drawPath(head)
+
+    def paint(self, painter: QPainter, *_args: object) -> None:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor(self.ann.color)
+        corner = QPointF(self._b.x(), self._a.y())
+        painter.setPen(QPen(color, 1.3))
+        painter.drawLine(self._a, corner)
+        painter.drawLine(corner, self._b)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        for tip, tail in (
+            (self._a, corner),
+            (corner, self._a),
+            (corner, self._b),
+            (self._b, corner),
+        ):
+            self._arrow(painter, tip, tail)
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        for point in (self._a, self._b):
+            painter.drawEllipse(point, self.POINT_RADIUS, self.POINT_RADIUS)
+        background = QColor(self.ann.text_background or "#ffffff")
+        if not self.ann.text_background:
+            background.setAlpha(0)
+        painter.setBrush(background)
+        painter.setPen(QPen(color, 1.2))
+        painter.drawRoundedRect(self._box, 5.0, 5.0)
+        painter.setFont(self.font)
+        painter.setPen(color)
+        pad_x, pad_y = self.PADDING
+        painter.drawText(
+            self._box.adjusted(pad_x, pad_y, -pad_x, -pad_y),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextDontClip),
+            "\n".join(self.label_lines),
+        )
+
+    # -- interaction ----------------------------------------------------------------------
+
+    def _point_at(self, local: QPointF) -> str | None:
+        for name, point in (("B", self._b), ("A", self._a)):
+            if math.hypot(local.x() - point.x(), local.y() - point.y()) <= self.POINT_PICK_RADIUS:
+                return name
+        return None
+
+    def mouseDragEvent(self, ev) -> None:
+        if self.ann.locked or ev.button() != Qt.MouseButton.LeftButton:
+            ev.ignore()
+            return
+        if ev.isStart():
+            self._dragging = self._point_at(self.mapFromScene(ev.buttonDownScenePos()))
+            if self._dragging is None:
+                ev.ignore()  # not on a point: let the view pan
+                return
+            self.hub.selected.emit(self.ann.id)
+        if self._dragging is None:
+            ev.ignore()
+            return
+        ev.accept()
+        scene_pos = ev.scenePos()
+        x = self.sub.view_box.mapSceneToView(scene_pos).x()  # X is shared by all views
+        series_id = self.points[self._dragging][0]
+        near = self.sub.curve_near(scene_pos)
+        if near is not None and self.plot.config.subplots[self.subplot].curve(near) is not None:
+            series_id = near
+        previous = self.points[self._dragging]
+        self.points[self._dragging] = (series_id, x)
+        if self._resolve(self._dragging) is None:
+            self.points[self._dragging] = previous  # outside the curve's data: stay put
+        self.relayout()
+        if ev.isFinish():
+            self._dragging = None
+            (sa, xa), (sb, xb) = self.points["A"], self.points["B"]
+            self.hub.delta_moved.emit(self.ann.id, sa, xa, sb, xb)
+
+    def mouseClickEvent(self, ev) -> None:
+        if not _handle_click(self, self.ann, self.hub, ev):
+            ev.accept()
+
+
 ITEM_CLASSES: dict[str, type] = {
     "text": TextAnnotationItem,
     "vline": LineAnnotationItem,
@@ -480,6 +720,17 @@ def _curve_y(plot: PlotWidget, curve: CurveConfig, x: float) -> float:
     if not lo <= x <= hi:
         return math.nan
     return curve_value(plot, curve, x, "linear")
+
+
+def _x_unit(plot: PlotWidget) -> str:
+    """Unit of X values: the axis unit, the X series unit (XY mode), else seconds."""
+    x_cfg = plot.config.x_axis
+    if x_cfg.unit:
+        return x_cfg.unit
+    if x_cfg.x_mode == "series" and x_cfg.x_series_id:
+        series = plot.session.get_series(x_cfg.x_series_id)
+        return series.unit if series is not None else ""
+    return "s"
 
 
 def _coords_text(
@@ -534,15 +785,15 @@ class AnnotationLayer:
         ]
 
     def _context(self, ann: Annotation, subplot: int) -> object:
-        """What else a shown item depends on: for a bubble, its curve (style, gain, data)."""
-        if ann.kind != "bubble":
+        """What else a shown item depends on: for curve-attached kinds, their curves."""
+        if ann.kind not in ("bubble", "delta"):
             return None
-        curve = self.plot.config.subplots[subplot].curve(ann.series_id)
-        series = self.plot.session.get_series(ann.series_id)
+        ids = [ann.series_id] + ([ann.series_id_b] if ann.kind == "delta" else [])
+        sub_cfg = self.plot.config.subplots[subplot]
         x_cfg = self.plot.config.x_axis
         return (
-            copy.deepcopy(curve),
-            id(series),
+            [copy.deepcopy(sub_cfg.curve(sid)) for sid in ids],
+            [id(self.plot.session.get_series(sid)) for sid in ids],
             x_cfg.x_mode,
             x_cfg.x_series_id,
             x_cfg.unit,
@@ -592,6 +843,20 @@ class AnnotationLayer:
                 [item],
             )
             return
+        elif ann.kind == "delta":
+            sub_cfg = self.plot.config.subplots[subplot]
+            if sub_cfg.curve(ann.series_id) is None or (
+                sub_cfg.curve(ann.series_id_b or ann.series_id) is None
+            ):
+                return
+            delta = DeltaAnnotationItem(ann, self.hub, self.plot, subplot)
+            delta.attach()
+            self._shown[(ann.id, subplot)] = (
+                copy.deepcopy(ann),
+                self._context(ann, subplot),
+                [delta],
+            )
+            return
         else:
             item = ITEM_CLASSES[ann.kind](ann, self.hub)
         items: list[pg.GraphicsObject] = [item]
@@ -605,6 +870,9 @@ class AnnotationLayer:
         for it in items:
             if isinstance(it, BubbleAnnotationItem):
                 it.detach()
+            if isinstance(it, DeltaAnnotationItem):
+                it.detach()
+                continue
             view = it.getViewBox()
             if view is not None:
                 view.removeItem(it)
@@ -654,6 +922,7 @@ class AnnotationManager(QObject):
         hub.menu_requested.connect(self._show_menu, queued)
         hub.delete_requested.connect(self.delete, queued)
         hub.offset_changed.connect(self.set_offset, queued)
+        hub.delta_moved.connect(self.set_delta_points, queued)
         plot.config_changed.connect(self.refresh)
         self.refresh()
         return layer
@@ -682,7 +951,7 @@ class AnnotationManager(QObject):
             ]
             if linked:
                 return linked
-        if ann.kind == "bubble":
+        if ann.kind in ("bubble", "delta"):
             return self._bubble_targets(ann, owner)
         if owner is not None and ann.subplot < len(owner.subplots):
             return [(ann.plot_id, ann.subplot)]
@@ -784,6 +1053,45 @@ class AnnotationManager(QObject):
         )
         return self.store.add(ann)
 
+    def create_delta(
+        self, dock_id: str, plot: PlotWidget, subplot: int, series_id: str, x: float
+    ) -> Annotation | None:
+        """Δ on ``series_id`` from ``x`` (A) to a point B 15 % of the view further."""
+        curve = plot.config.subplots[subplot].curve(series_id)
+        series = self.session.get_series(series_id)
+        if curve is None or series is None or len(series.x) == 0:
+            return None
+        lo, hi = plot.x_range()
+        x_max = float(np.nanmax(series.x))
+        x_b = min(x + 0.15 * (hi - lo), x_max)
+        if x_b <= x:
+            x, x_b = max(float(np.nanmin(series.x)), x - 0.15 * (hi - lo)), x
+        alias = series_id.split("/", 1)[0]
+        dataset = self.session.dataset(alias)
+        ann = Annotation(
+            kind="delta",
+            x=x,
+            x2=x_b,
+            series_id=series_id,
+            series_id_b=series_id,
+            color="#37474f",
+            axis_id=curve.axis_id,
+            plot_id=dock_id,
+            subplot=subplot,
+            dataset_alias=alias,
+            dataset_path=str(dataset.path) if dataset is not None and dataset.path else "",
+        )
+        return self.store.add(ann)
+
+    def set_delta_points(
+        self, ann_id: str, series_a: str, x_a: float, series_b: str, x_b: float
+    ) -> None:
+        ann = self.store.get(ann_id)
+        if ann is None:
+            return
+        ann.series_id, ann.x, ann.series_id_b, ann.x2 = series_a, x_a, series_b, x_b
+        self.store.update(ann)
+
     def set_offset(self, ann_id: str, dx: float, dy: float) -> None:
         ann = self.store.get(ann_id)
         if ann is None:
@@ -870,38 +1178,51 @@ class AnnotationManager(QObject):
                     ),
                 )
                 if kind == "text":
-                    self._add_bubble_actions(sub_menu, dock_id, plot, subplot, scene_pos)
+                    self._add_curve_actions(sub_menu, "bubble", dock_id, plot, subplot, scene_pos)
+                    self._add_curve_actions(sub_menu, "delta", dock_id, plot, subplot, scene_pos)
 
         return extend
 
-    def _add_bubble_actions(
-        self, menu: QMenu, dock_id: str, plot: PlotWidget, subplot: int, scene_pos: QPointF
+    def _add_curve_actions(
+        self,
+        menu: QMenu,
+        kind: AnnotationKind,
+        dock_id: str,
+        plot: PlotWidget,
+        subplot: int,
+        scene_pos: QPointF,
     ) -> None:
-        """« Bulle sur « courbe » » for the curve under the mouse, else one per curve."""
+        """Curve-attached kinds: an entry for the curve under the mouse, else one per curve."""
         sub_cfg = plot.config.subplots[subplot]
         curves = [c for c in sub_cfg.curves if c.visible]
         x = plot.subplots[subplot].view_box.mapSceneToView(scene_pos).x()
         near = plot.subplots[subplot].curve_near(scene_pos)
         if near is not None:
             curves = [c for c in curves if c.series_id == near]
+        on_curve, generic = (
+            (Msg.ANN_BUBBLE_ON, Msg.ANN_BUBBLE)
+            if kind == "bubble"
+            else (Msg.ANN_DELTA_ON, Msg.ANN_DELTA)
+        )
+        create = self._create_bubble_interactive if kind == "bubble" else self._create_delta
         if len(curves) == 1:
-            name = plot.series_label(curves[0])
             menu.addAction(
-                tr(Msg.ANN_BUBBLE_ON).format(name=name),
-                partial(
-                    self._create_bubble_interactive, dock_id, plot, subplot, curves[0].series_id, x
-                ),
+                tr(on_curve).format(name=plot.series_label(curves[0])),
+                partial(create, dock_id, plot, subplot, curves[0].series_id, x),
             )
             return
-        bubble_menu = menu.addMenu(tr(Msg.ANN_BUBBLE))
-        bubble_menu.setEnabled(bool(curves))
+        sub_menu = menu.addMenu(tr(generic))
+        sub_menu.setEnabled(bool(curves))
         for curve in curves:
-            bubble_menu.addAction(
+            sub_menu.addAction(
                 plot.series_label(curve),
-                partial(
-                    self._create_bubble_interactive, dock_id, plot, subplot, curve.series_id, x
-                ),
+                partial(create, dock_id, plot, subplot, curve.series_id, x),
             )
+
+    def _create_delta(
+        self, dock_id: str, plot: PlotWidget, subplot: int, series_id: str, x: float
+    ) -> None:
+        self.create_delta(dock_id, plot, subplot, series_id, x)
 
     def _create_bubble_interactive(
         self, dock_id: str, plot: PlotWidget, subplot: int, series_id: str, x: float

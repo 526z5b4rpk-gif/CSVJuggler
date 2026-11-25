@@ -24,6 +24,7 @@ from csvjuggler.ui.widgets import ColorButton, DisposableDialog
 KIND_NAMES = {
     "text": Msg.ANN_TEXT,
     "bubble": Msg.ANN_BUBBLE,
+    "delta": Msg.ANN_DELTA_KIND,
     "vline": Msg.ANN_VLINE,
     "hline": Msg.ANN_HLINE,
     "region": Msg.ANN_REGION,
@@ -66,7 +67,10 @@ class AnnotationDialog(DisposableDialog):
         form.addRow(tr(Msg.ANN_LBL_FONT_SIZE), self.font_spin)
         form.addRow(tr(Msg.ANN_LBL_BACKGROUND), bg_row)
         form.addRow(tr(Msg.ANN_LBL_OPACITY), self.opacity_spin)
-        if ann.kind != "hline":
+        if ann.kind == "delta":
+            form.addRow(tr(Msg.ANN_LBL_XA), self.x_spin)
+            form.addRow(tr(Msg.ANN_LBL_XB), self.x2_spin)
+        elif ann.kind != "hline":
             form.addRow(tr(Msg.ANN_LBL_X), self.x_spin)
         if ann.kind in ("text", "hline"):
             form.addRow(tr(Msg.ANN_LBL_Y), self.y_spin)

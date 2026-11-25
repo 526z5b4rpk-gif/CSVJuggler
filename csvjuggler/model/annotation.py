@@ -1,4 +1,5 @@
-"""Annotations: text, bubble attached to a curve, vertical line, horizontal line, X region.
+"""Annotations: text, bubble attached to a curve, delta between two curve points, vertical
+line, horizontal line, X region.
 
 X coordinates are stored in the time unit of the series (seconds after import scaling),
 never in pixels. Annotations are attached to a dataset (alias + file path) and are saved
@@ -19,7 +20,7 @@ from PySide6.QtCore import QObject, Signal
 
 log = logging.getLogger(__name__)
 
-AnnotationKind = Literal["text", "bubble", "vline", "hline", "region"]
+AnnotationKind = Literal["text", "bubble", "delta", "vline", "hline", "region"]
 COMPANION_SUFFIX = ".annotations.json"
 COMPANION_VERSION = 1
 
@@ -30,7 +31,7 @@ class Annotation:
     x: float = 0.0
     y: float = 0.0
     x2: float = 0.0
-    """End of an X region."""
+    """End of an X region; X of point B of a delta."""
     text: str = ""
     color: str = "#d62728"
     font_size: int = 10
@@ -42,7 +43,9 @@ class Annotation:
     show_coords: bool = True
     """Text and bubble: show the anchor point coordinates in the bubble."""
     series_id: str = ""
-    """Bubble only: curve the point is attached to (its y is the curve value at ``x``)."""
+    """Bubble and delta (point A): curve the point is attached to (y = curve value at ``x``)."""
+    series_id_b: str = ""
+    """Delta only: curve of point B, at ``x2``."""
     offset_x: float = 24.0
     offset_y: float = -36.0
     """Bubble only: bottom-left corner of the bubble relative to its point, in pixels
@@ -68,7 +71,7 @@ class Annotation:
 
     @property
     def center_x(self) -> float:
-        return (self.x + self.x2) / 2 if self.kind == "region" else self.x
+        return (self.x + self.x2) / 2 if self.kind in ("region", "delta") else self.x
 
 
 class AnnotationStore(QObject):
