@@ -222,7 +222,13 @@ class Msg:
     MENU_SYNC_NEW_LABEL = "Nom du groupe :"
     MENU_REMOVE_SUBPLOT = "Retirer ce sous-graphe"
     MENU_MOVE_TO_AXIS = "Déplacer vers l'axe"
-    MENU_NEW_AXIS = "Nouvel axe"
+    MENU_NEW_AXIS = "Nouvel axe à droite"
+    MENU_NEW_AXIS_LEFT = "Nouvel axe à gauche"
+    MENU_AXIS_TO_LEFT = "Placer l'axe à gauche"
+    MENU_AXIS_TO_RIGHT = "Placer l'axe à droite"
+    LBL_AXIS_SIDE = "Côté :"
+    SIDE_LEFT = "Gauche"
+    SIDE_RIGHT = "Droite"
 
     # Annotations
     MENU_ADD_ANNOTATION = "Ajouter une annotation"

@@ -14,7 +14,12 @@ from PySide6.QtCore import QObject, QPointF
 from PySide6.QtWidgets import QInputDialog, QMenu, QWidget
 
 from csvjuggler.i18n import Msg, tr
-from csvjuggler.model.plot_config import GLOBAL_SYNC_GROUP, X_AXIS_ID, CurveConfig
+from csvjuggler.model.plot_config import (
+    GLOBAL_SYNC_GROUP,
+    PRIMARY_Y_AXIS_ID,
+    X_AXIS_ID,
+    CurveConfig,
+)
 from csvjuggler.ui.dialogs.curve_settings_dialog import CurveSettingsDialog
 from csvjuggler.ui.dialogs.plot_settings_dialog import AxisSettingsDialog, PlotSettingsDialog
 from csvjuggler.ui.plot_widget import PlotWidget
@@ -96,6 +101,10 @@ class PlotController(QObject):
         axes_menu.addAction(
             tr(Msg.MENU_NEW_AXIS), partial(plot.move_curve_to_axis, subplot, curve.series_id, None)
         )
+        axes_menu.addAction(
+            tr(Msg.MENU_NEW_AXIS_LEFT),
+            partial(plot.move_curve_to_axis, subplot, curve.series_id, None, "left"),
+        )
         for extension in self.curve_menu_extensions:
             extension(menu, plot, subplot, curve)
         menu.addAction(
@@ -128,7 +137,19 @@ class PlotController(QObject):
         menu.addAction(tr(Msg.MENU_AXIS_SETTINGS), lambda: self.edit_axis(subplot, axis_id))
         menu.addAction(tr(Msg.MENU_AUTO_ONCE), lambda: plot.auto_range_once(subplot, axis_id))
         menu.addAction(tr(Msg.MENU_AUTO), lambda: self._set_auto(subplot, axis_id))
+        cfg = plot.axis_config(subplot, axis_id)
+        if cfg is not None and axis_id not in (X_AXIS_ID, PRIMARY_Y_AXIS_ID):
+            menu.addSeparator()
+            other = "right" if cfg.side == "left" else "left"
+            label = Msg.MENU_AXIS_TO_RIGHT if other == "right" else Msg.MENU_AXIS_TO_LEFT
+            menu.addAction(tr(label), partial(self._set_side, subplot, axis_id, other))
         return menu
+
+    def _set_side(self, subplot: int, axis_id: str, side: str) -> None:
+        cfg = self.plot.axis_config(subplot, axis_id)
+        if cfg is not None:
+            cfg.side = "left" if side == "left" else "right"
+            self.plot.set_axis_config(subplot, cfg)
 
     def _set_auto(self, subplot: int, axis_id: str) -> None:
         cfg = self.plot.axis_config(subplot, axis_id)

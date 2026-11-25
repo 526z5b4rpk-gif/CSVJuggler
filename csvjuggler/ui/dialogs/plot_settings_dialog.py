@@ -24,9 +24,10 @@ from PySide6.QtWidgets import (
 )
 
 from csvjuggler.i18n import Msg, tr
-from csvjuggler.model.plot_config import X_AXIS_ID, AxisConfig, PlotConfig
+from csvjuggler.model.plot_config import PRIMARY_Y_AXIS_ID, X_AXIS_ID, AxisConfig, PlotConfig
 from csvjuggler.ui.widgets import ColorButton, DisposableDialog
 
+SIDE_CHOICES = ((Msg.SIDE_LEFT, "left"), (Msg.SIDE_RIGHT, "right"))
 LEGEND_CHOICES = (
     (Msg.LEGEND_TOP_LEFT, "top-left"),
     (Msg.LEGEND_TOP_RIGHT, "top-right"),
@@ -90,6 +91,10 @@ class AxisSettingsWidget(QWidget):
             )
             form.addRow(tr(Msg.LBL_X_MODE), self.x_mode_combo)
             form.addRow(tr(Msg.LBL_X_SERIES), self.x_series_combo)
+        self.side_combo: QComboBox | None = None
+        if not is_x and axis.axis_id != PRIMARY_Y_AXIS_ID:  # secondary Y axis
+            self.side_combo = _combo(SIDE_CHOICES, axis.side)
+            form.addRow(tr(Msg.LBL_AXIS_SIDE), self.side_combo)
 
         self.auto_check = QCheckBox(tr(Msg.LBL_AUTO_RANGE))
         self.auto_check.setChecked(axis.auto_range)
@@ -163,6 +168,8 @@ class AxisSettingsWidget(QWidget):
         if a.axis_id == X_AXIS_ID:
             a.x_mode = self.x_mode_combo.currentData()
             a.x_series_id = self.x_series_combo.currentData()
+        if self.side_combo is not None:
+            a.side = self.side_combo.currentData()
         return a
 
 

@@ -138,5 +138,5 @@ def test_curve_menu_move_to_new_axis(plot: PlotWidget) -> None:
     curves = next(a.menu() for a in menu.actions() if a.text() == "Courbes")
     torque_menu = next(a.menu() for a in curves.actions() if a.text() == "torque")
     move = next(a.menu() for a in torque_menu.actions() if a.text() == "Déplacer vers l'axe")
-    next(a for a in move.actions() if a.text() == "Nouvel axe").trigger()
+    next(a for a in move.actions() if a.text() == "Nouvel axe à droite").trigger()
     assert plot.config.subplots[0].curve(TORQUE).axis_id == "y1"

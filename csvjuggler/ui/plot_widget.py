@@ -30,6 +30,7 @@ from csvjuggler.model.plot_config import (
     PRIMARY_Y_AXIS_ID,
     X_AXIS_ID,
     AxisConfig,
+    AxisSide,
     CurveConfig,
     PlotConfig,
     SubplotConfig,
@@ -55,6 +56,7 @@ LEGEND_ANCHORS: dict[str, tuple[tuple[int, int], tuple[int, int], tuple[int, int
 }
 CURVE_PICK_DISTANCE_PX = 8.0
 RIGHT_MARGIN_DROP_PX = 40.0
+LEFT_MARGIN_DROP_PX = 25.0
 """A drop this close to the right edge of the plotting area (or beyond) creates a new axis."""
 
 
@@ -165,6 +167,11 @@ class SubPlot:
         rect = self.view_box.sceneBoundingRect()
         return scene_pos.x() >= rect.right() - RIGHT_MARGIN_DROP_PX
 
+    def is_in_left_margin(self, scene_pos: QPointF) -> bool:
+        """On the primary axis, the left secondary axes, or the first pixels of the view."""
+        rect = self.view_box.sceneBoundingRect()
+        return scene_pos.x() <= rect.left() + LEFT_MARGIN_DROP_PX
+
     # -- apply ----------------------------------------------------------------------------
 
     def apply(self, cfg: SubplotConfig, plot_cfg: PlotConfig, is_last: bool) -> list[str]:
@@ -194,6 +201,7 @@ class SubPlot:
             self.plot_item.setAxisItems({"bottom": self.bottom_axis})
             self.bottom_axis.setZValue(-1000)
             self._connect_axis(self.bottom_axis)
+            self.multi_axis.relayout()  # setAxisItems re-adds it at its unshifted cell
         axis = self.bottom_axis
         axis.setStyle(showValues=show_values)
         axis.set_format(cfg)
@@ -212,7 +220,7 @@ class SubPlot:
     def _apply_y_axes(self, cfg: SubplotConfig) -> None:
         self._apply_y_axis(self.left_axis, self.view_box, cfg.y_axes[0], None)
         secondary = cfg.y_axes[1:]
-        self.multi_axis.ensure([a.axis_id for a in secondary])
+        self.multi_axis.ensure([(a.axis_id, a.side) for a in secondary])
         for axis_cfg in secondary:
             first = next((c for c in cfg.curves if c.axis_id == axis_cfg.axis_id), None)
             self._apply_y_axis(
@@ -575,7 +583,11 @@ class PlotWidget(pg.GraphicsLayoutWidget):
     # -- curves ---------------------------------------------------------------------------
 
     def add_series(
-        self, series_ids: list[str], subplot: int = 0, new_axis: bool = False
+        self,
+        series_ids: list[str],
+        subplot: int = 0,
+        new_axis: bool = False,
+        side: AxisSide = "right",
     ) -> list[str]:
         """Add curves to ``subplot`` (already present ids are skipped). Returns added ids.
 
@@ -589,29 +601,33 @@ class PlotWidget(pg.GraphicsLayoutWidget):
         ]
         if not ids:
             return []
-        axis_id = self._new_axis(sub_cfg, ids[0]) if new_axis else sub_cfg.y_axes[0].axis_id
+        axis_id = self._new_axis(sub_cfg, ids[0], side) if new_axis else sub_cfg.y_axes[0].axis_id
         for series_id in ids:
             color = next_color(c.color for c in self._config.all_curves())
             sub_cfg.curves.append(CurveConfig(series_id=series_id, color=color, axis_id=axis_id))
         self._commit()
         return ids
 
-    def _new_axis(self, sub_cfg: SubplotConfig, series_id: str) -> str:
+    def _new_axis(self, sub_cfg: SubplotConfig, series_id: str, side: AxisSide = "right") -> str:
         series = self.session.get_series(series_id)
         axis = AxisConfig(
-            axis_id=sub_cfg.new_axis_id(), side="right", unit=series.unit if series else ""
+            axis_id=sub_cfg.new_axis_id(), side=side, unit=series.unit if series else ""
         )
         sub_cfg.y_axes.append(axis)
         return axis.axis_id
 
-    def move_curve_to_axis(self, subplot: int, series_id: str, axis_id: str | None) -> str:
-        """Attach a curve to ``axis_id`` (``None`` → a new secondary axis). Returns the axis."""
+    def move_curve_to_axis(
+        self, subplot: int, series_id: str, axis_id: str | None, side: AxisSide = "right"
+    ) -> str:
+        """Attach a curve to ``axis_id`` (``None`` → a new secondary axis on ``side``).
+
+        Returns the axis id."""
         sub_cfg = self._config.subplots[subplot]
         curve = sub_cfg.curve(series_id)
         if curve is None:
             raise KeyError(series_id)
         if axis_id is None:
-            axis_id = self._new_axis(sub_cfg, series_id)
+            axis_id = self._new_axis(sub_cfg, series_id, side)
         elif sub_cfg.axis(axis_id) is None:
             raise KeyError(axis_id)
         curve.axis_id = axis_id
@@ -726,5 +742,10 @@ class PlotWidget(pg.GraphicsLayoutWidget):
         scene_pos = self.mapToScene(event.position().toPoint())
         self.activated.emit()
         subplot = self.subplot_at(scene_pos)
-        new_axis = self.subplots[subplot].is_in_right_margin(scene_pos)
-        self.add_series(ids, subplot, new_axis=new_axis)
+        target = self.subplots[subplot]
+        if target.is_in_right_margin(scene_pos):
+            self.add_series(ids, subplot, new_axis=True, side="right")
+        elif target.is_in_left_margin(scene_pos):
+            self.add_series(ids, subplot, new_axis=True, side="left")
+        else:
+            self.add_series(ids, subplot)
