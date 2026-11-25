@@ -100,6 +100,31 @@ git pull
 pip install -e .        # avec l'environnement activé, au cas où les dépendances ont changé
 ```
 
+## Exécutable Windows (sans Python)
+
+`CsvJuggler.exe` est un dossier autonome : Python, Qt et les bibliothèques sont dedans.
+Il suffit de copier le dossier sur le PC et de lancer `CsvJuggler.exe`.
+
+**Le plus simple : le faire construire par GitHub.**
+
+1. Sur GitHub, onglet **Actions** → **Exécutable Windows** → **Run workflow**.
+2. À la fin (environ 5 minutes), télécharger l'artefact **CsvJuggler-windows** (un `.zip`).
+3. Dézipper où l'on veut (par exemple `C:\Outils\CsvJuggler`) et lancer `CsvJuggler.exe`.
+   On peut l'épingler à la barre des tâches, ou l'associer aux `.csv` par clic droit → « Ouvrir avec ».
+
+Pousser une étiquette de version (`git tag v0.2.0 && git push --tags`) construit aussi l'exe
+et le joint à la « release » GitHub correspondante.
+
+**Ou sur un PC Windows** où le projet est installé (voir plus haut) :
+
+```powershell
+pip install -e ".[package]"
+python packaging\build_exe.py
+```
+
+Résultat : `dist\CsvJuggler\CsvJuggler.exe` et `dist\CsvJuggler-windows.zip`.
+PyInstaller ne fait pas de compilation croisée : un exe Windows se construit sous Windows.
+
 ## Installation pour le développement
 
 Pour lancer les tests et les outils qualité (pytest, pytest-qt, ruff, mypy), installe les dépendances de développement :

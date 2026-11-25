@@ -1,0 +1,44 @@
+name: Exécutable Windows
+
+# Builds CsvJuggler.exe on a Windows machine of GitHub (PyInstaller does not cross-compile).
+# Run it from the « Actions » tab (« Run workflow »), or push a tag such as v0.2.0.
+# The zip is available as an artifact of the run (and attached to the release for a tag).
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Installer
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,package]"
+      - name: Tests (informatifs, ne bloquent pas la construction)
+        continue-on-error: true
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pytest -q
+      - name: Construire l'exécutable
+        run: python packaging/build_exe.py
+      - name: Vérifier qu'il démarre
+        run: dist\CsvJuggler\CsvJuggler.exe --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CsvJuggler-windows
+          path: dist/CsvJuggler-windows.zip
+      - name: Joindre à la release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/CsvJuggler-windows.zip
