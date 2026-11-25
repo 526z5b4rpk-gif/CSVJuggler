@@ -12,7 +12,7 @@ import copy
 from functools import partial
 
 from PySide6.QtCore import QSignalBlocker, Qt
-from PySide6.QtGui import QColor, QIcon, QPixmap
+from PySide6.QtGui import QColor, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QFormLayout,
     QGridLayout,
@@ -132,7 +132,7 @@ class ToolboxPanel(QWidget):
         ann_layout.addWidget(add_box)
         hint = QLabel(tr(Msg.TOOLBOX_ADD_HINT), ann_page)
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: gray;")
+        hint.setForegroundRole(QPalette.ColorRole.PlaceholderText)
         ann_layout.addWidget(hint)
         selection_box = QGroupBox(tr(Msg.TOOLBOX_SELECTION), ann_page)
         selection_layout = QVBoxLayout(selection_box)
@@ -229,7 +229,7 @@ class ToolboxPanel(QWidget):
                 text = tr(Msg.TOOLBOX_CURVE_ITEM).format(name=text, subplot=subplot + 1)
             item = QListWidgetItem(_swatch(curve.color), text)
             if not curve.visible:
-                item.setForeground(QColor("gray"))
+                item.setForeground(self.palette().color(QPalette.ColorRole.PlaceholderText))
             self.curve_list.addItem(item)
         row = keys.index(previous) if previous in keys else (0 if keys else -1)
         self.curve_list.setCurrentRow(row)

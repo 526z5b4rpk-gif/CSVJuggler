@@ -19,6 +19,7 @@ from csvjuggler.data.analysis import (
     value_at,
 )
 from csvjuggler.model.plot_config import CurveConfig
+from csvjuggler.ui import theme
 from csvjuggler.ui.plot_widget import PlotWidget, display_data
 from csvjuggler.ui.timeline import format_x
 
@@ -94,7 +95,10 @@ class ValueCursor(QObject):
         anchor = (0, 1) if self.label_at_bottom else (0, 0)
         for sub in self.plot.subplots:
             line = pg.InfiniteLine(angle=90, movable=False, pen=self.pen)
-            label = pg.TextItem(anchor=anchor, color="#000000", fill=pg.mkBrush(255, 255, 255, 220))
+            colors = theme.plot_colors()
+            label = pg.TextItem(
+                anchor=anchor, color=colors.label_text, fill=pg.mkBrush(*colors.label_fill)
+            )
             for item in (line, label):
                 item.setZValue(self.z)
                 sub.view_box.addItem(item, ignoreBounds=True)

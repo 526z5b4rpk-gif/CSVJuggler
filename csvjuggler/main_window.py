@@ -20,6 +20,7 @@ from PySide6.QtGui import (
     QCloseEvent,
     QDragEnterEvent,
     QDropEvent,
+    QGuiApplication,
     QKeySequence,
     QPainter,
 )
@@ -58,6 +59,7 @@ from csvjuggler.model.layout import (
 )
 from csvjuggler.model.plot_config import PlotConfig
 from csvjuggler.model.session import Session
+from csvjuggler.ui import theme
 from csvjuggler.ui.annotation_items import AnnotationManager
 from csvjuggler.ui.annotation_panel import AnnotationPanel
 from csvjuggler.ui.dialogs.annotation_dialog import edit_annotation
@@ -82,6 +84,7 @@ MAX_RECENT = 10
 KEY_RECENT_FILES = "recent_files"
 KEY_RECENT_LAYOUTS = "recent_layouts"
 KEY_LAST_LAYOUT = "last_layout"
+KEY_THEME = "theme"
 
 
 def _csv_paths(urls: Iterable) -> list[Path]:
@@ -222,6 +225,7 @@ class MainWindow(QMainWindow):
         self.series_tree.context_menu_requested.connect(self._on_tree_menu)
         self.new_plot()
         self._initial_panel_sizes()
+        QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_system_colors_changed)
         self.mark_saved()  # an empty window with its default graph is not a modification
         self.history.reset()
 
@@ -290,6 +294,19 @@ class MainWindow(QMainWindow):
         for dock in (self.annotation_dock, self.measure_dock, self.toolbox_dock):
             window_menu.addAction(dock.toggleViewAction())
         window_menu.addAction(self.time_toolbar.toggleViewAction())
+        window_menu.addSeparator()
+        theme_menu = window_menu.addMenu(tr(Msg.MENU_THEME))
+        self.theme_actions = QActionGroup(self)
+        for label, mode in (
+            (Msg.THEME_LIGHT, "light"),
+            (Msg.THEME_DARK, "dark"),
+            (Msg.THEME_SYSTEM, "system"),
+        ):
+            action = theme_menu.addAction(tr(label), partial(self.set_theme, mode))
+            action.setCheckable(True)
+            action.setData(mode)
+            self.theme_actions.addAction(action)
+        self._check_theme_action(self.theme_mode())
         window_menu.addSeparator()
         window_menu.addAction(tr(Msg.ACTION_DETACH_CURRENT), self.detach_current_plot)
         window_menu.addAction(tr(Msg.ACTION_FULL_SCREEN_CURRENT), self.full_screen_current_plot)
@@ -993,6 +1010,33 @@ class MainWindow(QMainWindow):
     def _on_edit_menu(self) -> None:
         self.history.commit()  # show the pending edit's text in the menu
         self._update_undo_actions()
+
+    # -- theme ----------------------------------------------------------------------------
+
+    def theme_mode(self) -> str:
+        mode = str(self.settings.value(KEY_THEME, "light"))
+        return mode if mode in ("light", "dark", "system") else "light"
+
+    def _check_theme_action(self, mode: str) -> None:
+        for action in self.theme_actions.actions():
+            action.setChecked(action.data() == mode)
+
+    def set_theme(self, mode: str) -> None:
+        """Light, dark or system theme: style, palette and every graph."""
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            theme.apply_theme(app, mode)
+        self.settings.setValue(KEY_THEME, mode)
+        self._check_theme_action(mode)
+        for dock in self.plot_docks:
+            # Same config re-applied: picks the new default colours (background, axes,
+            # legend, cursor labels) and rebuilds the items that depend on them.
+            dock.plot.update_config(copy.deepcopy(dock.plot.config))
+        self.time_bar.timeline.update()
+
+    def _on_system_colors_changed(self, *_args: object) -> None:
+        if self.theme_mode() == "system":
+            self.set_theme("system")
 
     def _initial_panel_sizes(self) -> None:
         """Side panels narrow, the measure panel short: most of the room for the graphs."""

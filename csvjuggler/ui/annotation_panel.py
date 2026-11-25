@@ -40,7 +40,6 @@ class AnnotationPanel(QWidget):
                 text = f"[{ann.dataset_alias}] {text}"
             item = QListWidgetItem(text)
             item.setData(ANN_ID_ROLE, ann.id)
-            item.setForeground(Qt.GlobalColor.black)
             item.setToolTip(ann.dataset_path)
             self.list.addItem(item)
 

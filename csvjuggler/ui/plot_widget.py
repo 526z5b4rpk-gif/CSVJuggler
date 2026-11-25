@@ -36,6 +36,7 @@ from csvjuggler.model.plot_config import (
     SubplotConfig,
 )
 from csvjuggler.model.session import Session
+from csvjuggler.ui import theme
 from csvjuggler.ui.multi_axis import MultiAxis
 from csvjuggler.ui.plot_items import DateAxis, FormattedAxis, PlotViewBox
 from csvjuggler.ui.series_tree import SERIES_MIME_TYPE, decode_series_ids
@@ -276,6 +277,7 @@ class SubPlot:
             self.legend.setVisible(False)
             return
         self.legend.setVisible(True)
+        self.legend.setLabelTextColor(theme.plot_colors().foreground)
         item_pos, parent_pos, offset = LEGEND_ANCHORS.get(position, LEGEND_ANCHORS["top-left"])
         self.legend.anchor(item_pos, parent_pos, offset)
 
@@ -454,7 +456,7 @@ class PlotWidget(pg.GraphicsLayoutWidget):
         self._config = config
         self._applying = True
         try:
-            self.setBackground(config.background)
+            self.setBackground(theme.effective_background(config.background))
             self._sync_subplot_count(len(config.subplots))
             missing: list[str] = []
             last = len(self.subplots) - 1

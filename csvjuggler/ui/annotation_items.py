@@ -38,6 +38,7 @@ from csvjuggler.i18n import Msg, tr
 from csvjuggler.model.annotation import Annotation, AnnotationKind
 from csvjuggler.model.plot_config import CurveConfig
 from csvjuggler.model.session import Session
+from csvjuggler.ui import theme
 from csvjuggler.ui.cursors import curve_value
 from csvjuggler.ui.plot_widget import PlotWidget
 
@@ -1143,7 +1144,8 @@ class AnnotationManager(QObject):
             x2=x_b,
             series_id=series_id,
             series_id_b=series_id,
-            color="#37474f",
+            color="#37474f" if theme.current_theme() == "light" else "#c9ced6",
+            text_background="#ffffff" if theme.current_theme() == "light" else "#23272e",
             axis_id=curve.axis_id,
             plot_id=dock_id,
             subplot=subplot,

@@ -143,6 +143,9 @@ Les règles du projet (architecture, conventions, décisions techniques) sont da
   L'« Écart Δ » mesure Δx, 1/Δx et Δy entre deux points accrochés à des courbes.
 - **Graphe dans sa propre fenêtre** : « Fenêtre ▾ » dans la barre du graphe → Détacher, Plein écran (F11, Échap pour sortir),
   moitié gauche/droite de l'écran, ou un autre écran. Le bouton fermer de la fenêtre remet le graphe dans la fenêtre principale.
+- **Annuler / Rétablir** : `Ctrl+Z` / `Ctrl+Maj+Z` (ou `Ctrl+Y`), menu Édition — annotations et réglages des graphes.
+- **Mode sombre** : Fenêtre → Thème → Clair, Sombre ou Système.
+- **Axes Y à gauche** : clic droit sur une courbe → Déplacer vers l'axe → Nouvel axe à gauche, ou dépôt d'une série sur le bord gauche du graphe.
 - **Personnaliser** : clic droit sur un graphe, un axe, une courbe ou une annotation. Double-clic sur le fond pour les paramètres du graphe.
 
 ## Dépannage

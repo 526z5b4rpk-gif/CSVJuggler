@@ -8,10 +8,11 @@ import sys
 from collections.abc import Sequence
 
 import pyqtgraph as pg
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
 from csvjuggler.i18n import Msg
-from csvjuggler.main_window import MainWindow
+from csvjuggler.main_window import KEY_THEME, MainWindow
 from csvjuggler.model.session import Session
 from csvjuggler.ui.theme import apply_theme
 
@@ -40,8 +41,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     app = existing if isinstance(existing, QApplication) else QApplication(sys.argv[:1])
     app.setApplicationName(Msg.APP_NAME)
     app.setOrganizationName(Msg.APP_NAME)
-    pg.setConfigOptions(antialias=False, background="w", foreground="k")
-    apply_theme(app)
+    pg.setConfigOptions(antialias=False)
+    mode = str(QSettings().value(KEY_THEME, "light"))
+    apply_theme(app, mode if mode in ("light", "dark", "system") else "light")
 
     session = Session()
     window = MainWindow(session)
