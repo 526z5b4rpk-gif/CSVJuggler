@@ -11,7 +11,18 @@ import logging
 import sys
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QIcon,
+    QImage,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPalette,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import QApplication
 
 log = logging.getLogger(__name__)
@@ -92,28 +103,70 @@ def light_palette() -> QPalette:
     return palette
 
 
+def _icon_image(size: int) -> QImage:
+    """The icon at ``size`` pixels, drawn on a 64-unit grid (simplified below 32 px)."""
+    image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    s = size / 64
+    small = size < 32
+
+    def pt(x: float, y: float) -> QPointF:
+        return QPointF(x * s, y * s)
+
+    # Tile: rounded square, blue gradient, soft highlight at the top.
+    tile = QRectF(2 * s, 2 * s, 60 * s, 60 * s)
+    gradient = QLinearGradient(tile.topLeft(), tile.bottomRight())
+    gradient.setColorAt(0, QColor("#3a8ee6"))
+    gradient.setColorAt(1, QColor("#16467f"))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(gradient)
+    painter.drawRoundedRect(tile, 14 * s, 14 * s)
+    highlight = QLinearGradient(0, 2 * s, 0, 30 * s)
+    highlight.setColorAt(0, QColor(255, 255, 255, 46))
+    highlight.setColorAt(1, QColor(255, 255, 255, 0))
+    painter.setBrush(highlight)
+    painter.drawRoundedRect(tile, 14 * s, 14 * s)
+
+    round_pen = (Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    if not small:
+        # Grid lines.
+        painter.setPen(QPen(QColor(255, 255, 255, 38), max(1.0, 1.2 * s)))
+        for y in (20, 32, 44):
+            painter.drawLine(pt(10, y), pt(54, y))
+        # Second curve (orange), behind the main one.
+        second = QPainterPath(pt(10, 40))
+        second.cubicTo(pt(20, 40), pt(22, 30), pt(31, 33))
+        second.cubicTo(pt(40, 36), pt(44, 26), pt(54, 24))
+        painter.setPen(QPen(QColor("#ffb347"), 2.8 * s, *round_pen))
+        painter.drawPath(second)
+    # Main curve (white).
+    main = QPainterPath(pt(10, 46))
+    main.cubicTo(pt(17, 46), pt(19, 18), pt(28, 18))
+    main.cubicTo(pt(37, 18), pt(36, 38), pt(44, 38))
+    main.cubicTo(pt(49, 38), pt(51, 30), pt(54, 28))
+    painter.setPen(QPen(QColor("#ffffff"), (6.5 if small else 3.8) * s, *round_pen))
+    painter.drawPath(main)
+    if not small:
+        # Playhead: dashed vertical line, a dot where it crosses the main curve.
+        x = 40 * s
+        painter.setPen(QPen(QColor(255, 255, 255, 170), 1.6 * s, Qt.PenStyle.DashLine))
+        painter.drawLine(QPointF(x, 12 * s), QPointF(x, 52 * s))
+        t = next((k / 400 for k in range(401) if main.pointAtPercent(k / 400).x() >= x), 1.0)
+        painter.setPen(QPen(QColor("#16467f"), 2 * s))
+        painter.setBrush(QColor("#ffd166"))
+        painter.drawEllipse(QPointF(x, main.pointAtPercent(t).y()), 4.2 * s, 4.2 * s)
+    painter.end()
+    return image
+
+
 def app_icon() -> QIcon:
-    """A small chart drawn at run time (no image file to ship)."""
+    """Curves on a blue tile with a playhead; drawn at run time (no image file to ship)."""
     icon = QIcon()
-    for size in (16, 24, 32, 48, 64, 128, 256):
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        s = size / 32
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(ACCENT))
-        painter.drawRoundedRect(QRectF(1 * s, 1 * s, 30 * s, 30 * s), 6 * s, 6 * s)
-        path = QPainterPath(QPointF(5 * s, 22 * s))
-        for x, y in ((10, 14), (15, 18), (21, 8), (27, 12)):
-            path.lineTo(QPointF(x * s, y * s))
-        painter.setPen(QPen(QColor("#ffffff"), max(1.0, 2.6 * s)))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawPath(path)
-        painter.setPen(QPen(QColor("#ffd27f"), max(1.0, 1.6 * s)))
-        painter.drawLine(QPointF(5 * s, 26 * s), QPointF(27 * s, 26 * s))
-        painter.end()
-        icon.addPixmap(pixmap)
+    for size in (16, 20, 24, 32, 40, 48, 64, 128, 256, 512):
+        icon.addPixmap(QPixmap.fromImage(_icon_image(size)))
     return icon
 
 
