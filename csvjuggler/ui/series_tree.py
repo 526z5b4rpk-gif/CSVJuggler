@@ -44,7 +44,9 @@ class SeriesModel(QStandardItemModel):
         self._session = session
         self._rebuilding = False
         session.datasets_changed.connect(self.rebuild)
-        session.series_names_changed.connect(self.rebuild)
+        # Queued: a rename comes from editing an item of this model (itemChanged); rebuilding
+        # right away would delete that item inside its own setData and crash.
+        session.series_names_changed.connect(self.rebuild, Qt.ConnectionType.QueuedConnection)
         self.itemChanged.connect(self._on_item_changed)
         self.rebuild()
 
