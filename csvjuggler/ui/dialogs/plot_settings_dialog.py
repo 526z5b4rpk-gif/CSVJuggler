@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Callable, Sequence
 
+from PySide6.QtCore import QSignalBlocker, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -194,6 +195,110 @@ class AxisSettingsDialog(DisposableDialog):
         return self.editor.axis()
 
 
+class PlotGeneralWidget(QWidget):
+    """Graph-level settings (title, background, grid, legend, sync group, subplot ratios).
+
+    Used by the settings dialog and the toolbox: :attr:`changed` is emitted on each user
+    edit (text fields when editing is finished); :meth:`set_config` does not emit it.
+    """
+
+    changed = Signal()
+
+    def __init__(self, config: PlotConfig, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        form = QFormLayout(self)
+        self.title_edit = QLineEdit(self)
+        self.title_size_spin = QSpinBox(self)
+        self.title_size_spin.setRange(6, 48)
+        self.show_title_check = QCheckBox(tr(Msg.LBL_SHOW_TITLE), self)
+        self.background_button = ColorButton(parent=self)
+        self.grid_x_check = QCheckBox(tr(Msg.LBL_GRID_X), self)
+        self.grid_y_check = QCheckBox(tr(Msg.LBL_GRID_Y), self)
+        self.grid_alpha_spin = _spin(0.0, 1.0, 0.3, decimals=2)
+        self.grid_alpha_spin.setSingleStep(0.05)
+        self.legend_combo = _combo(LEGEND_CHOICES, "top-left")
+        self.sync_edit = QLineEdit(self)
+        self.sync_edit.setPlaceholderText(tr(Msg.LBL_SYNC_HINT))
+        self.ratios_edit = QLineEdit(self)
+        form.addRow(tr(Msg.LBL_TITLE), self.title_edit)
+        form.addRow(tr(Msg.LBL_TITLE_SIZE), self.title_size_spin)
+        form.addRow(self.show_title_check)
+        form.addRow(tr(Msg.LBL_BACKGROUND), self.background_button)
+        grid_row = QHBoxLayout()
+        grid_row.addWidget(self.grid_x_check)
+        grid_row.addWidget(self.grid_y_check)
+        form.addRow(grid_row)
+        form.addRow(tr(Msg.LBL_GRID_ALPHA), self.grid_alpha_spin)
+        form.addRow(tr(Msg.LBL_LEGEND), self.legend_combo)
+        form.addRow(tr(Msg.LBL_SYNC_GROUP), self.sync_edit)
+        form.addRow(tr(Msg.LBL_RATIOS), self.ratios_edit)
+        self.set_config(config)
+        for edit in (self.title_edit, self.sync_edit, self.ratios_edit):
+            edit.editingFinished.connect(self.changed)
+        for check in (self.show_title_check, self.grid_x_check, self.grid_y_check):
+            check.toggled.connect(self.changed)
+        self.title_size_spin.valueChanged.connect(self.changed)
+        self.grid_alpha_spin.valueChanged.connect(self.changed)
+        self.legend_combo.currentIndexChanged.connect(self.changed)
+        self.background_button.color_changed.connect(self.changed)
+
+    def _widgets(self) -> tuple[QWidget, ...]:
+        return (
+            self.title_edit,
+            self.title_size_spin,
+            self.show_title_check,
+            self.background_button,
+            self.grid_x_check,
+            self.grid_y_check,
+            self.grid_alpha_spin,
+            self.legend_combo,
+            self.sync_edit,
+            self.ratios_edit,
+        )
+
+    def set_config(self, config: PlotConfig) -> None:
+        blockers = [QSignalBlocker(w) for w in self._widgets()]
+        if not self.title_edit.hasFocus():
+            self.title_edit.setText(config.title)
+        self.title_size_spin.setValue(config.title_size)
+        self.show_title_check.setChecked(config.show_title)
+        self.background_button.set_color(config.background)
+        self.grid_x_check.setChecked(config.show_grid_x)
+        self.grid_y_check.setChecked(config.show_grid_y)
+        self.grid_alpha_spin.setValue(config.grid_alpha)
+        self.legend_combo.setCurrentIndex(
+            max(0, self.legend_combo.findData(config.legend_position))
+        )
+        if not self.sync_edit.hasFocus():
+            self.sync_edit.setText(config.sync_group)
+        if not self.ratios_edit.hasFocus():
+            self.ratios_edit.setText(", ".join(f"{sp.ratio:g}" for sp in config.subplots))
+        del blockers
+
+    def _ratios(self) -> list[float]:
+        values: list[float] = []
+        for part in self.ratios_edit.text().replace(";", ",").split(","):
+            try:
+                values.append(max(0.05, float(part.strip().replace(" ", ""))))
+            except ValueError:
+                values.append(1.0)
+        return values
+
+    def apply_to(self, c: PlotConfig) -> None:
+        """Write the edited values into ``c`` (in place)."""
+        c.title = self.title_edit.text()
+        c.title_size = self.title_size_spin.value()
+        c.show_title = self.show_title_check.isChecked()
+        c.background = self.background_button.color or "#ffffff"
+        c.show_grid_x = self.grid_x_check.isChecked()
+        c.show_grid_y = self.grid_y_check.isChecked()
+        c.grid_alpha = self.grid_alpha_spin.value()
+        c.legend_position = self.legend_combo.currentData()
+        c.sync_group = self.sync_edit.text().strip()
+        for sub, ratio in zip(c.subplots, self._ratios(), strict=False):
+            sub.ratio = ratio
+
+
 class PlotSettingsDialog(DisposableDialog):
     """Edits a copy of a :class:`PlotConfig`; :meth:`config` returns the result."""
 
@@ -208,37 +313,8 @@ class PlotSettingsDialog(DisposableDialog):
         self._config = copy.deepcopy(config)
         tabs = QTabWidget()
 
-        general = QWidget()
-        form = QFormLayout(general)
-        self.title_edit = QLineEdit(config.title)
-        self.title_size_spin = QSpinBox()
-        self.title_size_spin.setRange(6, 48)
-        self.title_size_spin.setValue(config.title_size)
-        self.show_title_check = QCheckBox(tr(Msg.LBL_SHOW_TITLE))
-        self.show_title_check.setChecked(config.show_title)
-        self.background_button = ColorButton(config.background)
-        self.grid_x_check = QCheckBox(tr(Msg.LBL_GRID_X))
-        self.grid_x_check.setChecked(config.show_grid_x)
-        self.grid_y_check = QCheckBox(tr(Msg.LBL_GRID_Y))
-        self.grid_y_check.setChecked(config.show_grid_y)
-        self.grid_alpha_spin = _spin(0.0, 1.0, config.grid_alpha, decimals=2)
-        self.grid_alpha_spin.setSingleStep(0.05)
-        self.legend_combo = _combo(LEGEND_CHOICES, config.legend_position)
-        self.sync_edit = QLineEdit(config.sync_group)
-        self.sync_edit.setPlaceholderText(tr(Msg.LBL_SYNC_HINT))
-        self.ratios_edit = QLineEdit(", ".join(f"{sp.ratio:g}" for sp in config.subplots))
-        form.addRow(tr(Msg.LBL_TITLE), self.title_edit)
-        form.addRow(tr(Msg.LBL_TITLE_SIZE), self.title_size_spin)
-        form.addRow(self.show_title_check)
-        form.addRow(tr(Msg.LBL_BACKGROUND), self.background_button)
-        grid_row = QHBoxLayout()
-        grid_row.addWidget(self.grid_x_check)
-        grid_row.addWidget(self.grid_y_check)
-        form.addRow(grid_row)
-        form.addRow(tr(Msg.LBL_GRID_ALPHA), self.grid_alpha_spin)
-        form.addRow(tr(Msg.LBL_LEGEND), self.legend_combo)
-        form.addRow(tr(Msg.LBL_SYNC_GROUP), self.sync_edit)
-        form.addRow(tr(Msg.LBL_RATIOS), self.ratios_edit)
+        self.general = PlotGeneralWidget(config, self)
+        general = self.general
         tabs.addTab(general, tr(Msg.TAB_GENERAL))
 
         self.x_editor = AxisSettingsWidget(config.x_axis, series_choices)
@@ -266,28 +342,9 @@ class PlotSettingsDialog(DisposableDialog):
         layout.addWidget(tabs)
         layout.addWidget(_buttons(self))
 
-    def _ratios(self) -> list[float]:
-        values: list[float] = []
-        for part in self.ratios_edit.text().replace(";", ",").split(","):
-            try:
-                values.append(max(0.05, float(part.strip().replace(" ", ""))))
-            except ValueError:
-                values.append(1.0)
-        return values
-
     def config(self) -> PlotConfig:
         c = copy.deepcopy(self._config)
-        c.title = self.title_edit.text()
-        c.title_size = self.title_size_spin.value()
-        c.show_title = self.show_title_check.isChecked()
-        c.background = self.background_button.color or "#ffffff"
-        c.show_grid_x = self.grid_x_check.isChecked()
-        c.show_grid_y = self.grid_y_check.isChecked()
-        c.grid_alpha = self.grid_alpha_spin.value()
-        c.legend_position = self.legend_combo.currentData()
-        c.sync_group = self.sync_edit.text().strip()
-        for sub, ratio in zip(c.subplots, self._ratios(), strict=False):
-            sub.ratio = ratio
+        self.general.apply_to(c)
         c.x_axis = self.x_editor.axis()
         for s, editor in self.y_editors:
             axis = editor.axis()

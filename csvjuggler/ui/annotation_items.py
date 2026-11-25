@@ -1235,6 +1235,24 @@ class AnnotationManager(QObject):
             else:
                 self.store.update(result)
 
+    def add_interactive(
+        self,
+        kind: AnnotationKind,
+        dock_id: str,
+        plot: PlotWidget,
+        subplot: int,
+        x: float,
+        y: float,
+        series_id: str = "",
+    ) -> None:
+        """Add an annotation as the context menu does (curve kinds need ``series_id``)."""
+        if kind == "bubble":
+            self._create_bubble_interactive(dock_id, plot, subplot, series_id, x)
+        elif kind == "delta":
+            self._create_delta(dock_id, plot, subplot, series_id, x)
+        else:
+            self._create_interactive(kind, dock_id, plot, subplot, x, y)
+
     def _create_interactive(
         self, kind: AnnotationKind, dock_id: str, plot: PlotWidget, subplot: int, x: float, y: float
     ) -> None:

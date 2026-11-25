@@ -68,6 +68,7 @@ from csvjuggler.ui.plot_dock import PlotDock
 from csvjuggler.ui.progress import run_with_progress
 from csvjuggler.ui.series_tree import SeriesTree
 from csvjuggler.ui.time_slider import TimeSliderBar
+from csvjuggler.ui.toolbox import ToolboxPanel
 from csvjuggler.ui.x_sync import XSyncManager
 
 log = logging.getLogger(__name__)
@@ -181,6 +182,12 @@ class MainWindow(QMainWindow):
         self.measure_dock.setObjectName("measure_dock")
         self.measure_dock.setWidget(self.measure_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.measure_dock)
+
+        self.toolbox = ToolboxPanel(self.annotations)
+        self.toolbox_dock = QDockWidget(tr(Msg.DOCK_TOOLBOX), self)
+        self.toolbox_dock.setObjectName("toolbox_dock")
+        self.toolbox_dock.setWidget(self.toolbox)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.toolbox_dock)
         self.tracker_enabled = False
         self.tracker_mode = "linear"
 
@@ -255,7 +262,7 @@ class MainWindow(QMainWindow):
         window_menu.addAction(tr(Msg.ACTION_TILE), self.tile_plots)
         window_menu.addAction(tr(Msg.ACTION_CLOSE_ALL), self.close_all_plots)
         window_menu.addSeparator()
-        for dock in (self.annotation_dock, self.measure_dock):
+        for dock in (self.annotation_dock, self.measure_dock, self.toolbox_dock):
             window_menu.addAction(dock.toggleViewAction())
         window_menu.addAction(self.time_toolbar.toggleViewAction())
 
@@ -430,6 +437,7 @@ class MainWindow(QMainWindow):
             return
         self.current_dock = dock
         self.measure_panel.set_dock(dock)
+        self.toolbox.set_dock(dock)
 
     def _on_dock_closed(self, dock: PlotDock) -> None:
         if dock in self.plot_docks:

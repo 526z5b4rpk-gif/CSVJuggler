@@ -138,6 +138,8 @@ Les règles du projet (architecture, conventions, décisions techniques) sont da
 - **Annotations** : clic droit sur le graphe → « Ajouter une annotation ».
   « Bulle sur une courbe » accroche le point à la courbe et affiche ses coordonnées.
   Glisser la bulle la déplace (le point reste accroché), glisser le point le fait glisser le long de la courbe.
+- **Boîte à outils** (panneau de droite, menu Fenêtre) : réglages du graphe courant et de ses courbes appliqués en direct, et un bouton par type d'annotation.
+  L'« Écart Δ » mesure Δx, 1/Δx et Δy entre deux points accrochés à des courbes.
 - **Personnaliser** : clic droit sur un graphe, un axe, une courbe ou une annotation. Double-clic sur le fond pour les paramètres du graphe.
 
 ## Dépannage
