@@ -118,7 +118,7 @@ mypy csvjuggler
 
 Sous Linux sans écran (CI, SSH), les tests passent en mode `offscreen` : il est forcé dans `tests/conftest.py`.
 
-Les règles du projet (architecture, conventions, décisions techniques) sont dans [CLAUDE.md](CLAUDE.md).
+Les règles du projet (architecture, conventions, décisions techniques) sont dans [DOC.md](DOC.md).
 
 ## Utilisation rapide
 

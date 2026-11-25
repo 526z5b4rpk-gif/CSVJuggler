@@ -1,4 +1,4 @@
-# CLAUDE.md — CsvJuggler
+# DOC.md — CsvJuggler
 
 Visualiseur de séries temporelles issues de fichiers CSV, inspiré de PlotJuggler, écrit en Python.
 Cible principale : exports TwinCAT Scope et acquisitions de mesures industrielles.
