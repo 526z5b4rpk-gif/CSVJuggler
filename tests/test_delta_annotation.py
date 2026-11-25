@@ -148,3 +148,56 @@ def test_context_menu_offers_a_delta(window: MainWindow) -> None:
     menu = dock.controller.build_plot_menu(0, on_curve)
     add_menu = next(a.menu() for a in menu.actions() if a.text() == "Ajouter une annotation")
     assert "Écart Δ sur « speed »" in [a.text() for a in add_menu.actions()]
+
+
+def test_label_shows_the_chosen_values(window: MainWindow) -> None:
+    dock = window.plot_docks[0]
+    m = window.annotations
+    ann = m.create_delta(dock.dock_id, dock.plot, 0, SPEED, 0.1)
+    window.annotations.set_delta_points(ann.id, SPEED, 0.1, SPEED, 0.3)
+    assert [line.split(" =")[0] for line in _item(window, ann.id).label_lines] == [
+        "Δx",
+        "1/Δx",
+        "Δy",
+    ]
+    m.toggle_flag(ann.id, "show_inv_dx")
+    assert [line.split(" =")[0] for line in _item(window, ann.id).label_lines] == ["Δx", "Δy"]
+    m.toggle_flag(ann.id, "show_dx")
+    assert _item(window, ann.id).label_lines == ["Δy = 19.9"]
+    stored = window.session.annotations.get(ann.id)
+    assert (stored.show_dx, stored.show_inv_dx, stored.show_dy) == (False, False, True)
+    assert Annotation.from_dict(json.loads(json.dumps(stored.to_dict()))) == stored
+
+    # Nothing to show and no text: no label box, the dimension lines stay.
+    m.toggle_flag(ann.id, "show_dy")
+    item = _item(window, ann.id)
+    assert item.label_lines == [] and item._box.isEmpty() and item.isVisible()
+    # The text is still shown on its own.
+    stored = window.session.annotations.get(ann.id)
+    stored.text = "montée"
+    window.session.annotations.update(stored)
+    assert _item(window, ann.id).label_lines == ["montée"]
+
+
+def test_context_menu_toggles_the_values(window: MainWindow) -> None:
+    dock = window.plot_docks[0]
+    ann = window.annotations.create_delta(dock.dock_id, dock.plot, 0, SPEED, 0.1)
+    menu = window.annotations.build_annotation_menu(ann.id)
+    actions = {a.text(): a for a in menu.actions()}
+    assert all(actions[t].isChecked() for t in ("Afficher Δx", "Afficher 1/Δx (fréquence)"))
+    actions["Afficher Δy"].trigger()
+    assert not window.session.annotations.get(ann.id).show_dy
+
+
+def test_dialog_edits_the_values(qtbot) -> None:
+    from csvjuggler.ui.dialogs.annotation_dialog import AnnotationDialog
+
+    dialog = AnnotationDialog(Annotation(kind="delta", series_id=SPEED))
+    qtbot.addWidget(dialog)
+    assert dialog.dx_check.isVisibleTo(dialog) and dialog.dy_check.isVisibleTo(dialog)
+    dialog.inv_dx_check.setChecked(False)
+    result = dialog.annotation()
+    assert (result.show_dx, result.show_inv_dx, result.show_dy) == (True, False, True)
+    text_dialog = AnnotationDialog(Annotation(kind="text"))
+    qtbot.addWidget(text_dialog)
+    assert not text_dialog.dx_check.isVisibleTo(text_dialog)

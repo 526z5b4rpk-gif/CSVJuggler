@@ -54,6 +54,14 @@ class AnnotationDialog(DisposableDialog):
         self.locked_check.setChecked(ann.locked)
         self.arrow_check = QCheckBox(tr(Msg.ANN_LBL_ARROW))
         self.arrow_check.setChecked(ann.arrow)
+        self.dx_check = QCheckBox(tr(Msg.ANN_SHOW_DX), self)
+        self.dx_check.setChecked(ann.show_dx)
+        self.inv_dx_check = QCheckBox(tr(Msg.ANN_SHOW_INV_DX), self)
+        self.inv_dx_check.setChecked(ann.show_inv_dx)
+        self.dy_check = QCheckBox(tr(Msg.ANN_SHOW_DY), self)
+        self.dy_check.setChecked(ann.show_dy)
+        for check in (self.dx_check, self.inv_dx_check, self.dy_check):
+            check.setVisible(ann.kind == "delta")  # parented: would float over other forms
         self.coords_check = QCheckBox(tr(Msg.ANN_LBL_SHOW_COORDS))
         self.coords_check.setChecked(ann.show_coords)
         self.link_check = QCheckBox(tr(Msg.ANN_LBL_LINK_ALL))
@@ -70,6 +78,10 @@ class AnnotationDialog(DisposableDialog):
         if ann.kind == "delta":
             form.addRow(tr(Msg.ANN_LBL_XA), self.x_spin)
             form.addRow(tr(Msg.ANN_LBL_XB), self.x2_spin)
+            show_box = QVBoxLayout()
+            for check in (self.dx_check, self.inv_dx_check, self.dy_check):
+                show_box.addWidget(check)
+            form.addRow(tr(Msg.ANN_LBL_DELTA_SHOW), show_box)
         elif ann.kind != "hline":
             form.addRow(tr(Msg.ANN_LBL_X), self.x_spin)
         if ann.kind in ("text", "hline"):
@@ -103,6 +115,9 @@ class AnnotationDialog(DisposableDialog):
         a.locked = self.locked_check.isChecked()
         a.arrow = self.arrow_check.isChecked()
         a.show_coords = self.coords_check.isChecked()
+        a.show_dx = self.dx_check.isChecked()
+        a.show_inv_dx = self.inv_dx_check.isChecked()
+        a.show_dy = self.dy_check.isChecked()
         a.link_all = self.link_check.isChecked()
         a.x, a.y, a.x2 = self.x_spin.value(), self.y_spin.value(), self.x2_spin.value()
         if a.kind == "region" and a.x2 < a.x:

@@ -46,6 +46,10 @@ class Annotation:
     """Bubble and delta (point A): curve the point is attached to (y = curve value at ``x``)."""
     series_id_b: str = ""
     """Delta only: curve of point B, at ``x2``."""
+    show_dx: bool = True
+    show_inv_dx: bool = True
+    show_dy: bool = True
+    """Delta only: values shown in the label (Δx, 1/Δx, Δy — or y(A), y(B) if units differ)."""
     offset_x: float = 24.0
     offset_y: float = -36.0
     """Bubble only: bottom-left corner of the bubble relative to its point, in pixels

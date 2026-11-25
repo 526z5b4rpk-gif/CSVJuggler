@@ -556,7 +556,7 @@ class DeltaAnnotationItem(pg.GraphicsObject):
         right = self._b.x() >= self._a.x()
         left = corner.x() + self.LABEL_GAP if right else corner.x() - self.LABEL_GAP - width
         top = (self._a.y() + self._b.y()) / 2 - height / 2
-        self._box = QRectF(left, top, width, height)
+        self._box = QRectF(left, top, width, height) if self.label_lines else QRectF()
 
         lines = QPainterPath(self._a)
         lines.lineTo(corner)
@@ -568,19 +568,25 @@ class DeltaAnnotationItem(pg.GraphicsObject):
             dot = QPainterPath()
             dot.addEllipse(point, self.POINT_PICK_RADIUS, self.POINT_PICK_RADIUS)
             hit = hit.united(dot)
-        box = QPainterPath()
-        box.addRect(self._box)
-        self._hit = hit.united(box)
+        if not self._box.isEmpty():
+            box = QPainterPath()
+            box.addRect(self._box)
+            hit = hit.united(box)
+        self._hit = hit
         self._bounds = self._hit.boundingRect().adjusted(-2, -2, 2, 2)
         self.update()
 
     def _label_lines(self, dx: float, ya: float, yb: float) -> list[str]:
         x_unit = _x_unit(self.plot)
         lines = [self.ann.text] if self.ann.text else []
-        lines.append(f"Δx = {format_number(dx)}" + (f" {x_unit}" if x_unit else ""))
-        if x_unit == "s" and dx != 0:
-            lines.append(f"1/Δx = {format_number(1 / abs(dx))} Hz")
+        if self.ann.show_dx:
+            lines.append(f"Δx = {format_number(dx)}" + (f" {x_unit}" if x_unit else ""))
+        if self.ann.show_inv_dx and dx != 0:
+            inv_unit = "Hz" if x_unit == "s" else (f"1/{x_unit}" if x_unit else "")
+            lines.append(f"1/Δx = {format_number(1 / abs(dx))} {inv_unit}".rstrip())
         unit_a, unit_b = (self._series_unit(self.points[n][0]) for n in ("A", "B"))
+        if not self.ann.show_dy:
+            return lines
         if unit_a == unit_b:
             lines.append(f"Δy = {format_number(yb - ya)}" + (f" {unit_a}" if unit_a else ""))
         else:
@@ -635,6 +641,8 @@ class DeltaAnnotationItem(pg.GraphicsObject):
         background = QColor(self.ann.text_background or "#ffffff")
         if not self.ann.text_background:
             background.setAlpha(0)
+        if self._box.isEmpty():
+            return
         painter.setBrush(background)
         painter.setPen(QPen(color, 1.2))
         painter.drawRoundedRect(self._box, 5.0, 5.0)
@@ -1273,9 +1281,27 @@ class AnnotationManager(QObject):
         lock = menu.addAction(tr(Msg.ANN_LOCK), lambda: self.set_locked(ann_id, not ann.locked))
         lock.setCheckable(True)
         lock.setChecked(ann.locked)
+        if ann.kind == "delta":
+            menu.addSeparator()
+            for label, field in (
+                (Msg.ANN_SHOW_DX, "show_dx"),
+                (Msg.ANN_SHOW_INV_DX, "show_inv_dx"),
+                (Msg.ANN_SHOW_DY, "show_dy"),
+            ):
+                action = menu.addAction(tr(label), partial(self.toggle_flag, ann_id, field))
+                action.setCheckable(True)
+                action.setChecked(bool(getattr(ann, field)))
         menu.addSeparator()
         menu.addAction(tr(Msg.ANN_DELETE), lambda: self.delete(ann_id))
         return menu
+
+    def toggle_flag(self, ann_id: str, field: str) -> None:
+        """Flip a boolean display option of an annotation (e.g. ``show_dy`` of a delta)."""
+        ann = self.store.get(ann_id)
+        if ann is None:
+            return
+        setattr(ann, field, not getattr(ann, field))
+        self.store.update(ann)
 
     def _show_menu(self, ann_id: str, screen_pos: QPointF) -> None:
         self.build_annotation_menu(ann_id).exec(screen_pos.toPoint())
