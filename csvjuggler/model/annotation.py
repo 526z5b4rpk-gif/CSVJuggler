@@ -133,6 +133,13 @@ class AnnotationStore(QObject):
             self._items.clear()
             self.annotations_changed.emit()
 
+    def replace_all(self, annotations: list[Annotation]) -> None:
+        """Set the whole content at once (undo/redo); one signal, only if it changes."""
+        items = {a.id: copy.deepcopy(a) for a in annotations}
+        if items != self._items:
+            self._items = items
+            self.annotations_changed.emit()
+
 
 def companion_path(csv_path: str | Path) -> Path:
     """``mesure.csv`` → ``mesure.csv.annotations.json``."""

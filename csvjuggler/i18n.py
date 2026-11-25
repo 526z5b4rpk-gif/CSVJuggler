@@ -30,6 +30,14 @@ class Msg:
 
     # Menus / actions
     MENU_FILE = "&Fichier"
+    MENU_EDIT = "É&dition"
+    ACTION_UNDO = "Annuler"
+    ACTION_REDO = "Rétablir"
+    ACTION_UNDO_TEXT = "Annuler : {text}"
+    ACTION_REDO_TEXT = "Rétablir : {text}"
+    UNDO_ANNOTATIONS = "annotations"
+    UNDO_PLOT = "réglages de « {name} »"
+    UNDO_PLOTS = "réglages des graphes"
     MENU_WINDOW = "Fe&nêtre"
     ACTION_OPEN = "&Ouvrir un CSV…"
     ACTION_QUIT = "&Quitter"

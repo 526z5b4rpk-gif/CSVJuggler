@@ -64,6 +64,7 @@ from csvjuggler.ui.dialogs.annotation_dialog import edit_annotation
 from csvjuggler.ui.dialogs.derived_dialog import DerivedDialog
 from csvjuggler.ui.dialogs.export_dialog import ExportCsvDialog
 from csvjuggler.ui.dialogs.import_dialog import ImportDialog
+from csvjuggler.ui.history import EditHistory
 from csvjuggler.ui.measure_panel import MeasurePanel
 from csvjuggler.ui.plot_dock import PlotDock
 from csvjuggler.ui.progress import run_with_progress
@@ -169,6 +170,8 @@ class MainWindow(QMainWindow):
             edit_dialog=edit_annotation,
         )
         self.annotations.focus_requested.connect(self._raise_dock)
+        self.history = EditHistory(session.annotations, lambda: list(self.plot_docks), self)
+        session.annotations.annotations_changed.connect(self.history.schedule)
         self.annotation_panel = AnnotationPanel(self.annotations)
         self.annotation_dock = QDockWidget(tr(Msg.DOCK_ANNOTATIONS), self)
         self.annotation_dock.setObjectName("annotation_dock")
@@ -220,6 +223,7 @@ class MainWindow(QMainWindow):
         self.new_plot()
         self._initial_panel_sizes()
         self.mark_saved()  # an empty window with its default graph is not a modification
+        self.history.reset()
 
     # -- menus ----------------------------------------------------------------------------
 
@@ -259,6 +263,21 @@ class MainWindow(QMainWindow):
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
+
+        edit_menu = self.menuBar().addMenu(tr(Msg.MENU_EDIT))
+        self.undo_action = QAction(tr(Msg.ACTION_UNDO), self)
+        self.undo_action.setShortcuts(QKeySequence.StandardKey.Undo)
+        self.undo_action.triggered.connect(self.history.undo)
+        self.redo_action = QAction(tr(Msg.ACTION_REDO), self)
+        self.redo_action.setShortcuts(
+            [*QKeySequence.keyBindings(QKeySequence.StandardKey.Redo), QKeySequence("Ctrl+Shift+Z")]
+        )
+        self.redo_action.triggered.connect(self.history.redo)
+        edit_menu.addAction(self.undo_action)
+        edit_menu.addAction(self.redo_action)
+        edit_menu.aboutToShow.connect(self._on_edit_menu)
+        self.history.changed.connect(self._update_undo_actions)
+        self._update_undo_actions()
 
         window_menu = self.menuBar().addMenu(tr(Msg.MENU_WINDOW))
         new_action = QAction(tr(Msg.ACTION_NEW_PLOT), self)
@@ -316,6 +335,7 @@ class MainWindow(QMainWindow):
         split_from: PlotDock | None = None,
         orientation: Qt.Orientation = Qt.Orientation.Vertical,
     ) -> PlotDock:
+        self.history.commit()
         self._plot_counter += 1
         while dock_id is None or any(d.dock_id == dock_id for d in self.plot_docks):
             dock_id = f"plot_{self._plot_counter}"
@@ -333,6 +353,8 @@ class MainWindow(QMainWindow):
         dock.split_requested.connect(self.split_plot)
         dock.plot.config_changed.connect(self.schedule_modified_check)
         dock.title_changed.connect(self.schedule_modified_check)
+        dock.plot.config_changed.connect(self.history.schedule)
+        dock.title_changed.connect(self.history.schedule)
         self.x_sync.register(dock.plot)
         dock.controller.menu_extensions.append(self._split_menu_extension(dock))
         dock.controller.menu_extensions.append(self.annotations.menu_extension(dock.dock_id))
@@ -352,6 +374,7 @@ class MainWindow(QMainWindow):
         dock.playhead.set_enabled(self.time_bar.cursor_visible)
         self._set_current(dock)
         self.schedule_modified_check()
+        self.history.rebase()
         return dock
 
     # -- measurement ----------------------------------------------------------------------
@@ -475,6 +498,7 @@ class MainWindow(QMainWindow):
         self.toolbox.set_dock(dock)
 
     def _on_dock_closed(self, dock: PlotDock) -> None:
+        self.history.commit()
         if dock in self.plot_docks:
             self.plot_docks.remove(dock)
         self.x_sync.unregister(dock.plot)
@@ -484,6 +508,7 @@ class MainWindow(QMainWindow):
         self.plot_area.removeDockWidget(dock)
         dock.deleteLater()
         self.schedule_modified_check()
+        self.history.rebase()
 
     def close_all_plots(self) -> None:
         for dock in list(self.plot_docks):
@@ -537,7 +562,9 @@ class MainWindow(QMainWindow):
             except CsvImportError as exc:
                 self._import_error(path, exc)
                 continue
-            self.session.add_dataset(dataset)
+            self.history.commit()  # edits made before opening stay undoable
+            self.session.add_dataset(dataset)  # may load its companion annotations…
+            self.history.rebase()  # …which are not an undoable edit
             self._push_recent(KEY_RECENT_FILES, path)
             self.statusBar().showMessage(
                 tr(Msg.STATUS_LOADED).format(
@@ -856,6 +883,7 @@ class MainWindow(QMainWindow):
 
         self.layout_path = path
         self.mark_saved()
+        self.history.reset()
         self._push_recent(KEY_RECENT_LAYOUTS, path)
         self.settings.setValue(KEY_LAST_LAYOUT, str(path.resolve()))
         missing = self.session.missing_series(layout.series_ids())
@@ -945,6 +973,26 @@ class MainWindow(QMainWindow):
                     )
         for dock in self.plot_docks:
             dock.plot.auto_range()
+
+    def _update_undo_actions(self) -> None:
+        history = self.history
+        stack = history.stack
+        self.undo_action.setEnabled(history.can_undo())
+        self.redo_action.setEnabled(stack.canRedo())
+        self.undo_action.setText(
+            tr(Msg.ACTION_UNDO_TEXT).format(text=stack.undoText())
+            if stack.canUndo()
+            else tr(Msg.ACTION_UNDO)
+        )
+        self.redo_action.setText(
+            tr(Msg.ACTION_REDO_TEXT).format(text=stack.redoText())
+            if stack.canRedo()
+            else tr(Msg.ACTION_REDO)
+        )
+
+    def _on_edit_menu(self) -> None:
+        self.history.commit()  # show the pending edit's text in the menu
+        self._update_undo_actions()
 
     def _initial_panel_sizes(self) -> None:
         """Side panels narrow, the measure panel short: most of the room for the graphs."""
