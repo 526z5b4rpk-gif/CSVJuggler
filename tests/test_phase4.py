@@ -118,6 +118,16 @@ def test_x_modes_absolute_and_xy(plot: PlotWidget) -> None:
     plot.set_axis_config(0, x)
     assert isinstance(plot.subplots[0].bottom_axis, FormattedAxis)
     np.testing.assert_allclose(plot.curve_item(SPEED).getData()[0], [1.5, 1.6, 1.7, 1.65, 1.8])
+    # XY: X is not sorted, so no « peak » downsampling (blocks along X) nor clip to view.
+    item = plot.curve_item(SPEED)
+    assert not item.opts["clipToView"] and not item.opts["autoDownsample"]
+    assert item.opts["downsample"] == 1
+    # The drawn points are the data points, in order (« 1.65 » goes back on X).
+    np.testing.assert_allclose(item.getData()[1], [0.0, 10.2, 20.5, 30.1, 40.0])
+    x.x_mode, x.x_series_id = "relative", ""
+    plot.set_axis_config(0, x)
+    assert item.opts["clipToView"] and item.opts["autoDownsample"]
+    assert item.opts["downsampleMethod"] == "peak"
 
 
 def test_plot_level_settings(plot: PlotWidget) -> None:

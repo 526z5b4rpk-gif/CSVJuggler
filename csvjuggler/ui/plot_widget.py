@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 from typing import Any
 
 import numpy as np
@@ -71,6 +72,27 @@ def display_data(
     if curve.gain != 1.0 or curve.offset != 0.0:
         y = curve.gain * y + curve.offset
     return x, y
+
+
+XY_MAX_POINTS = 500_000
+"""XY mode: above that many points, draw one point out of k (pairs kept together)."""
+
+
+def _set_sampling(item: pg.PlotDataItem, xy: bool, count: int) -> None:
+    """Downsampling suited to the X vector of the curve.
+
+    Time mode (X increasing): automatic « peak » downsampling and clip to view. XY mode
+    (X = another series, not sorted): both would pair x and y of different samples — pyqtgraph
+    cuts blocks along X and derives the step from ``x[-1] - x[0]`` — and draw a jagged mess.
+    So no clipping, and plain subsampling (whole samples) only for very large curves.
+    """
+    if xy:
+        item.setClipToView(False)
+        step = max(1, math.ceil(count / XY_MAX_POINTS))
+        item.setDownsampling(ds=step, auto=False, method="subsample")
+    else:
+        item.setDownsampling(auto=True, method="peak")
+        item.setClipToView(True)
 
 
 def _range_key(cfg: AxisConfig) -> tuple[Any, ...]:
@@ -284,6 +306,7 @@ class SubPlot:
             if self._data_keys.get(curve.series_id) != data_key:
                 self._data_keys[curve.series_id] = data_key
                 x, y = display_data(series, curve, x_series)
+                _set_sampling(item, xy=x_series is not None, count=len(x))
                 item.setData(x, y, stepMode="left" if curve.mode == "step" else None)
             item.setLogMode(x_cfg.log and x_cfg.x_mode != "absolute", axis_cfg.log)
             self._style_item(item, curve, curve.alias or series.label)
@@ -307,11 +330,12 @@ class SubPlot:
         if current is not view_box:
             # Same pyqtgraph 0.14 pitfall as in _create_item: while it moves, the item briefly
             # has no ViewBox parent, which clipToView does not survive.
+            clip = bool(item.opts["clipToView"])
             item.setClipToView(False)
             if current is not None:
                 current.removeItem(item)
             view_box.addItem(item)
-            item.setClipToView(True)
+            item.setClipToView(clip)
 
     def _style_item(self, item: pg.PlotDataItem, curve: CurveConfig, name: str) -> None:
         marker = None if curve.marker == "none" else curve.marker
