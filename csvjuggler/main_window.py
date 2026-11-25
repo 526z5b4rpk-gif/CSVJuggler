@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import itertools
 import json
@@ -68,8 +69,10 @@ from csvjuggler.ui.plot_dock import PlotDock
 from csvjuggler.ui.progress import run_with_progress
 from csvjuggler.ui.series_tree import SeriesTree
 from csvjuggler.ui.time_slider import TimeSliderBar
+from csvjuggler.ui.timeline import Lane
 from csvjuggler.ui.toolbox import ToolboxPanel
 from csvjuggler.ui.x_sync import XSyncManager
+from csvjuggler.utils.colors import color_for_index
 
 log = logging.getLogger(__name__)
 
@@ -198,6 +201,7 @@ class MainWindow(QMainWindow):
         self.time_toolbar.addWidget(self.time_bar)
         self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.time_toolbar)
         self.time_bar.position_changed.connect(self._on_playhead_moved)
+        self.time_bar.timeline.lane_activated.connect(self.frame_x)
         self.time_bar.visibility_changed.connect(self._on_playhead_visibility)
         session.datasets_changed.connect(self._update_time_range)
         session.series_data_changed.connect(self._update_time_range)
@@ -369,6 +373,23 @@ class MainWindow(QMainWindow):
 
     def _update_time_range(self, *_args: object) -> None:
         self.time_bar.set_range(self.session.x_extent())
+        lanes = [
+            Lane(alias, lo, hi, color_for_index(index))
+            for index, (alias, lo, hi) in enumerate(self.session.dataset_extents())
+        ]
+        self.time_bar.set_lanes(lanes, self.session.absolute_time())
+
+    def _update_view_band(self, *_args: object) -> None:
+        dock = self.current_dock
+        self.time_bar.set_view_range(dock.plot.x_range() if dock is not None else None)
+
+    def frame_x(self, lo: float, hi: float) -> None:
+        """Show [lo, hi] in the current graph (and, through the X sync, its group)."""
+        dock = self.current_dock or (self.plot_docks[0] if self.plot_docks else None)
+        if dock is None or not hi > lo:
+            return
+        margin = (hi - lo) * 0.02
+        dock.plot.subplots[0].view_box.setXRange(lo - margin, hi + margin, padding=0)
 
     def _on_playhead_visibility(self, visible: bool) -> None:
         for dock in self.plot_docks:
@@ -435,7 +456,16 @@ class MainWindow(QMainWindow):
     def _set_current(self, dock: PlotDock | None) -> None:
         if dock is self.current_dock:
             return
+        previous = self.current_dock
+        if previous is not None:
+            with contextlib.suppress(RuntimeError, TypeError):
+                previous.plot.subplots[0].view_box.sigXRangeChanged.disconnect(
+                    self._update_view_band
+                )
         self.current_dock = dock
+        if dock is not None:
+            dock.plot.subplots[0].view_box.sigXRangeChanged.connect(self._update_view_band)
+        self._update_view_band()
         self.measure_panel.set_dock(dock)
         self.toolbox.set_dock(dock)
 

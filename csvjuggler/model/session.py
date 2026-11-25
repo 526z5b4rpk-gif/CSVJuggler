@@ -248,6 +248,28 @@ class Session(QObject):
                     hi = max(hi, float(np.nanmax(series.x)))
         return (lo, hi) if lo < hi else None
 
+    def dataset_extents(self) -> list[tuple[str, float, float]]:
+        """``(alias, first X, last X)`` of every file dataset, in loading order."""
+        out: list[tuple[str, float, float]] = []
+        for dataset in self.file_datasets:
+            xs = [series.x for series in dataset.series.values() if len(series.x)]
+            if xs:
+                lo = min(float(np.nanmin(x)) for x in xs)
+                hi = max(float(np.nanmax(x)) for x in xs)
+                if math.isfinite(lo) and math.isfinite(hi):
+                    out.append((dataset.alias, lo, hi))
+        return out
+
+    def absolute_time(self) -> bool:
+        """True when every file dataset has a date/time X (epoch seconds)."""
+        datasets = self.file_datasets
+        return bool(datasets) and all(
+            d.import_settings is not None
+            and d.import_settings.time_mode == "column"
+            and d.import_settings.time_unit == "datetime"
+            for d in datasets
+        )
+
     def get_series(self, series_id: str) -> Series | None:
         try:
             alias, name = split_series_id(series_id)

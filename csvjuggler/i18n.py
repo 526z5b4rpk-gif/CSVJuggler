@@ -329,6 +329,10 @@ class Msg:
 
     # X playback bar
     TOOLBAR_SLIDER = "Lecture X"
+    TIMELINE_LANE_TIP = (
+        "{alias}\nDébut : {start}\nFin : {end}\nDurée : {duration} s\n(double-clic : cadrer)"
+    )
+    TIMELINE_TIME_TIP = "Position de lecture (date/heure UTC)"
     SLIDER_LABEL = "X :"
     SLIDER_SHOW = "Curseur"
     SLIDER_SHOW_TIP = "Afficher le curseur de lecture sur tous les graphes"

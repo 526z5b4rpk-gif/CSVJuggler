@@ -135,6 +135,7 @@ Les règles du projet (architecture, conventions, décisions techniques) sont da
   - `Ctrl+B` affiche les curseurs A/B ;
   - le panneau « Mesures » affiche les statistiques, copiables en TSV.
 - **Lecture X** : la barre en bas de la fenêtre déplace un curseur sur tous les graphes, avec lecture/pause.
+  Sa timeline montre une ligne par fichier CSV sur l'horloge commune (clic : positionner, double-clic : cadrer sur ce fichier).
 - **Annotations** : clic droit sur le graphe → « Ajouter une annotation ».
   « Bulle sur une courbe » accroche le point à la courbe et affiche ses coordonnées.
   Glisser la bulle la déplace (le point reste accroché), glisser le point le fait glisser le long de la courbe.

@@ -24,9 +24,9 @@ def window(qtbot, data_dir: Path) -> MainWindow:
 
 def test_bar_disabled_without_data_then_range_follows_session(window: MainWindow, data_dir) -> None:
     bar = window.time_bar
-    assert not bar.slider.isEnabled()
+    assert not bar.timeline.isEnabled()
     window.open_files([data_dir / "simple_comma.csv"], interactive=False)
-    assert bar.slider.isEnabled()
+    assert bar.timeline.isEnabled()
     assert (bar.lo, bar.hi) == pytest.approx((0.0, 0.4))
 
 
@@ -40,7 +40,7 @@ def test_dragging_shows_cursor_on_every_graph(window: MainWindow, data_dir) -> N
     bar = window.time_bar
     assert not first.playhead.enabled
 
-    bar.slider.setValue(bar.slider.maximum() // 2)  # what dragging does → x = 0.2
+    bar.timeline.position_requested.emit(bar.lo + (bar.hi - bar.lo) / 2)  # click → x = 0.2
     assert bar.show_check.isChecked()
     for dock in (first, lonely):
         assert dock.playhead.enabled

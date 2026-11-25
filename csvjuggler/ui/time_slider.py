@@ -1,24 +1,24 @@
-"""« Lecture X » bar: a slider (and play button) driving a cursor shown on every graph."""
+"""« Lecture X » bar: a timeline of the files (and play button) driving a cursor shown on
+every graph."""
 
 from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QElapsedTimer, Qt, QTimer, Signal
+from PySide6.QtCore import QElapsedTimer, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
-    QSlider,
     QToolButton,
     QWidget,
 )
 
 from csvjuggler.i18n import Msg, tr
+from csvjuggler.ui.timeline import Lane, TimelineWidget, format_x
 
-SLIDER_STEPS = 10_000
 PLAY_INTERVAL_MS = 30
 SPEEDS = (0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0)
 
@@ -39,9 +39,9 @@ class TimeSliderBar(QWidget):
         self.play_button.setCheckable(True)
         self.play_button.setText("▶")
         self.play_button.setToolTip(tr(Msg.SLIDER_PLAY_TIP))
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setRange(0, SLIDER_STEPS)
-        self.slider.setMinimumWidth(300)
+        self.timeline = TimelineWidget(self)
+        self.time_label = QLabel(self)
+        self.time_label.setToolTip(tr(Msg.TIMELINE_TIME_TIP))
         self.spin = QDoubleSpinBox()
         self.spin.setDecimals(6)
         self.spin.setMinimumWidth(110)
@@ -60,7 +60,8 @@ class TimeSliderBar(QWidget):
         layout.addWidget(QLabel(tr(Msg.SLIDER_LABEL)))
         layout.addWidget(self.show_check)
         layout.addWidget(self.play_button)
-        layout.addWidget(self.slider, 1)
+        layout.addWidget(self.timeline, 1)
+        layout.addWidget(self.time_label)
         layout.addWidget(self.spin)
         layout.addWidget(self.speed_combo)
         layout.addWidget(self.follow_check)
@@ -70,7 +71,7 @@ class TimeSliderBar(QWidget):
         self._timer.timeout.connect(self._tick)
         self._clock = QElapsedTimer()
 
-        self.slider.valueChanged.connect(self._on_slider)
+        self.timeline.position_requested.connect(self.set_position)
         self.spin.valueChanged.connect(self._on_spin)
         self.show_check.toggled.connect(self.visibility_changed)
         self.play_button.toggled.connect(self._on_play_toggled)
@@ -81,13 +82,15 @@ class TimeSliderBar(QWidget):
     def set_range(self, extent: tuple[float, float] | None) -> None:
         """X extent of the data (``None``: nothing loaded)."""
         has_data = extent is not None and math.isfinite(extent[0]) and extent[1] > extent[0]
-        for widget in (self.slider, self.spin, self.play_button, self.show_check):
+        for widget in (self.timeline, self.spin, self.play_button, self.show_check):
             widget.setEnabled(has_data)
         if not has_data:
             self.set_playing(False)
+            self.timeline.set_range(0.0, 0.0)
             return
         assert extent is not None
         self.lo, self.hi = extent
+        self.timeline.set_range(self.lo, self.hi)
         self._updating = True
         try:
             self.spin.setRange(self.lo, self.hi)
@@ -100,9 +103,9 @@ class TimeSliderBar(QWidget):
         self.position = x
         self._updating = True
         try:
-            frac = (x - self.lo) / (self.hi - self.lo) if self.hi > self.lo else 0.0
-            self.slider.setValue(round(frac * SLIDER_STEPS))
+            self.timeline.set_position(x)
             self.spin.setValue(x)
+            self._update_time_label()
         finally:
             self._updating = False
         if emit:
@@ -118,9 +121,20 @@ class TimeSliderBar(QWidget):
     def follow(self) -> bool:
         return self.follow_check.isChecked()
 
-    def _on_slider(self, value: int) -> None:
-        if not self._updating:
-            self.set_position(self.lo + (self.hi - self.lo) * value / SLIDER_STEPS)
+    def set_lanes(self, lanes: list[Lane], absolute: bool) -> None:
+        """One lane per file; ``absolute``: X is a date/time (epoch seconds)."""
+        self.timeline.set_lanes(lanes, absolute)
+        self._update_time_label()
+
+    def set_view_range(self, view: tuple[float, float] | None) -> None:
+        """Visible X range of the current graph, highlighted on the timeline."""
+        self.timeline.set_view_range(view)
+
+    def _update_time_label(self) -> None:
+        absolute = self.timeline.absolute
+        self.time_label.setVisible(absolute)
+        if absolute:
+            self.time_label.setText(format_x(self.position, True, full=True))
 
     def _on_spin(self, value: float) -> None:
         if not self._updating:

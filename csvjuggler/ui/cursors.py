@@ -20,6 +20,7 @@ from csvjuggler.data.analysis import (
 )
 from csvjuggler.model.plot_config import CurveConfig
 from csvjuggler.ui.plot_widget import PlotWidget, display_data
+from csvjuggler.ui.timeline import format_x
 
 CURSOR_Z = 60
 TRACKER_PEN = pg.mkPen("#555555", width=1, style=Qt.PenStyle.DashLine)
@@ -108,7 +109,9 @@ class ValueCursor(QObject):
             return
         for (line, label), sub_cfg in zip(self._items, self.plot.config.subplots, strict=False):
             line.setPos(x)
-            rows = [f"<b>x = {html.escape(format_number(x))}</b>"]
+            absolute = self.plot.config.x_axis.x_mode == "absolute"
+            x_text = format_x(x, absolute, 1.0) if absolute else format_number(x)
+            rows = [f"<b>x = {html.escape(x_text)}</b>"]
             for curve in sub_cfg.curves:
                 if not curve.visible:
                     continue
