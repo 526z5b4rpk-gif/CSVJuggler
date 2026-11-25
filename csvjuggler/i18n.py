@@ -222,6 +222,8 @@ class Msg:
     ANN_SHOW_INV_DX = "Afficher 1/Δx (fréquence)"
     ANN_SHOW_DY = "Afficher Δy"
     ANN_LBL_DELTA_SHOW = "Valeurs affichées"
+    ANN_LINE_STYLE = "Style des traits"
+    ANN_RESET_LABEL = "Replacer l'étiquette"
     ANN_LBL_XA = "X du point A"
     ANN_LBL_XB = "X du point B"
     ANN_VLINE = "Ligne verticale (événement)"

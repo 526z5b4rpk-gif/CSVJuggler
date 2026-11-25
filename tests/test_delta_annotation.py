@@ -109,24 +109,58 @@ def test_drag_point_slides_and_snaps_to_another_curve(window: MainWindow, qtbot)
     assert (moved.series_id, moved.x) == (SPEED, pytest.approx(0.1))
 
 
-def test_dragging_elsewhere_pans_the_view(window: MainWindow, qtbot) -> None:
+def _drag_from(window: MainWindow, qtbot, start: QPoint, delta: QPoint) -> None:
+    viewport = window.plot_docks[0].plot.viewport()
+    QTest.mousePress(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+    for step in range(1, 6):
+        QTest.mouseMove(viewport, start + delta * (step / 5))
+        qtbot.wait(1)
+    QTest.mouseRelease(
+        viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start + delta
+    )
+    qtbot.wait(20)
+
+
+def test_drag_label_moves_it_and_drag_line_pans(window: MainWindow, qtbot) -> None:
     dock = window.plot_docks[0]
     ann = window.annotations.create_delta(dock.dock_id, dock.plot, 0, SPEED, 0.1)
     item = _item(window, ann.id)
-    start = dock.plot.mapFromScene(item.mapToScene(item._box.center()))
+    box_center = dock.plot.mapFromScene(item.mapToScene(item._box.center()))
     del item
     before = dock.plot.x_range()
-    viewport = dock.plot.viewport()
-    QTest.mousePress(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
-    for step in range(1, 6):
-        QTest.mouseMove(viewport, start + QPoint(10 * step, 0))
-        qtbot.wait(1)
-    QTest.mouseRelease(
-        viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start + QPoint(50, 0)
-    )
-    qtbot.wait(20)
+    _drag_from(window, qtbot, box_center, QPoint(40, -60))
+    qtbot.waitUntil(lambda: window.session.annotations.get(ann.id).label_dy != 0)
+    moved = window.session.annotations.get(ann.id)
+    assert (moved.label_dx, moved.label_dy) == pytest.approx((40, -60), abs=1.5)
+    assert dock.plot.x_range() == pytest.approx(before)  # the view did not move
+    item = _item(window, ann.id)
+    assert item._leader is not None  # a leader line joins the moved label
+
+    # Dragging a dimension line (not a point, not the label) still pans the view.
+    middle = (item._a + QPointF(item._b.x(), item._a.y())) / 2
+    start = dock.plot.mapFromScene(item.mapToScene(middle))
+    del item
+    _drag_from(window, qtbot, start, QPoint(50, 0))
     assert dock.plot.x_range() != pytest.approx(before)
     assert window.session.annotations.get(ann.id).x == pytest.approx(0.1)
+
+    # « Replacer l'étiquette » puts it back.
+    menu = window.annotations.build_annotation_menu(ann.id)
+    next(a for a in menu.actions() if a.text() == "Replacer l'étiquette").trigger()
+    assert _item(window, ann.id).label_offset.isNull()
+
+
+def test_line_style(window: MainWindow) -> None:
+    dock = window.plot_docks[0]
+    ann = window.annotations.create_delta(dock.dock_id, dock.plot, 0, SPEED, 0.1)
+    assert ann.line_style == "solid"
+    menu = window.annotations.build_annotation_menu(ann.id)
+    style_menu = next(a.menu() for a in menu.actions() if a.text() == "Style des traits")
+    assert [a.text() for a in style_menu.actions()] == ["Plein", "Tirets", "Pointillés"]
+    next(a for a in style_menu.actions() if a.text() == "Pointillés").trigger()
+    stored = window.session.annotations.get(ann.id)
+    assert stored.line_style == "dot"
+    assert Annotation.from_dict(json.loads(json.dumps(stored.to_dict()))) == stored
 
 
 def test_delta_hidden_or_removed_with_its_curves(window: MainWindow) -> None:
@@ -196,8 +230,11 @@ def test_dialog_edits_the_values(qtbot) -> None:
     qtbot.addWidget(dialog)
     assert dialog.dx_check.isVisibleTo(dialog) and dialog.dy_check.isVisibleTo(dialog)
     dialog.inv_dx_check.setChecked(False)
+    dialog.line_style_combo.setCurrentIndex(dialog.line_style_combo.findData("dash"))
     result = dialog.annotation()
     assert (result.show_dx, result.show_inv_dx, result.show_dy) == (True, False, True)
+    assert result.line_style == "dash"
     text_dialog = AnnotationDialog(Annotation(kind="text"))
     qtbot.addWidget(text_dialog)
     assert not text_dialog.dx_check.isVisibleTo(text_dialog)
+    assert not text_dialog.line_style_combo.isVisibleTo(text_dialog)

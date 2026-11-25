@@ -494,6 +494,11 @@ class DeltaAnnotationItem(pg.GraphicsObject):
         self._bounds = QRectF()
         self._views: list[pg.ViewBox] = []
         self._dragging: str | None = None
+        """« A » / « B » (a point slides along its curve), « label » or None."""
+        self.label_offset = QPointF(ann.label_dx, ann.label_dy)
+        self._press_local = QPointF()
+        self._press_offset = QPointF()
+        self._leader: tuple[QPointF, QPointF] | None = None
 
     # -- placement ------------------------------------------------------------------------
 
@@ -555,8 +560,28 @@ class DeltaAnnotationItem(pg.GraphicsObject):
         corner = QPointF(self._b.x(), self._a.y())
         right = self._b.x() >= self._a.x()
         left = corner.x() + self.LABEL_GAP if right else corner.x() - self.LABEL_GAP - width
+        view = self.parentItem().boundingRect() if self.parentItem() is not None else None
+        if view is not None:  # keep the default place inside the plot area
+            if left + width > view.right():
+                left = corner.x() - self.LABEL_GAP - width
+            if left < view.left():
+                left = corner.x() + self.LABEL_GAP
         top = (self._a.y() + self._b.y()) / 2 - height / 2
-        self._box = QRectF(left, top, width, height) if self.label_lines else QRectF()
+        self._box = (
+            QRectF(left, top, width, height).translated(self.label_offset)
+            if self.label_lines
+            else QRectF()
+        )
+        # Moved label: a thin leader line from the vertical dimension line to the label.
+        self._leader = None
+        anchor = QPointF(self._b.x(), (self._a.y() + self._b.y()) / 2)
+        if not self._box.isEmpty() and not self.label_offset.isNull():
+            nearest = QPointF(
+                min(max(anchor.x(), self._box.left()), self._box.right()),
+                min(max(anchor.y(), self._box.top()), self._box.bottom()),
+            )
+            if math.hypot(nearest.x() - anchor.x(), nearest.y() - anchor.y()) > self.LABEL_GAP:
+                self._leader = (anchor, nearest)
 
         lines = QPainterPath(self._a)
         lines.lineTo(corner)
@@ -573,7 +598,10 @@ class DeltaAnnotationItem(pg.GraphicsObject):
             box.addRect(self._box)
             hit = hit.united(box)
         self._hit = hit
-        self._bounds = self._hit.boundingRect().adjusted(-2, -2, 2, 2)
+        bounds = self._hit.boundingRect()
+        if self._leader is not None:
+            bounds = bounds.united(QRectF(*self._leader).normalized())
+        self._bounds = bounds.adjusted(-2, -2, 2, 2)
         self.update()
 
     def _label_lines(self, dx: float, ya: float, yb: float) -> list[str]:
@@ -623,9 +651,16 @@ class DeltaAnnotationItem(pg.GraphicsObject):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         color = QColor(self.ann.color)
         corner = QPointF(self._b.x(), self._a.y())
-        painter.setPen(QPen(color, 1.3))
+        pen = QPen(color, 1.3)
+        pen.setStyle(LINE_STYLES.get(self.ann.line_style, Qt.PenStyle.SolidLine))
+        painter.setPen(pen)
         painter.drawLine(self._a, corner)
         painter.drawLine(corner, self._b)
+        if self._leader is not None:
+            leader_pen = QPen(color, 0.8)
+            leader_pen.setStyle(Qt.PenStyle.DotLine)
+            painter.setPen(leader_pen)
+            painter.drawLine(*self._leader)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(color)
         for tip, tail in (
@@ -668,15 +703,29 @@ class DeltaAnnotationItem(pg.GraphicsObject):
             ev.ignore()
             return
         if ev.isStart():
-            self._dragging = self._point_at(self.mapFromScene(ev.buttonDownScenePos()))
+            local = self.mapFromScene(ev.buttonDownScenePos())
+            self._dragging = self._point_at(local)
+            if self._dragging is None and self._box.contains(local):
+                self._dragging = "label"
+                self._press_local = local
+                self._press_offset = QPointF(self.label_offset)
             if self._dragging is None:
-                ev.ignore()  # not on a point: let the view pan
+                ev.ignore()  # on a dimension line: let the view pan
                 return
             self.hub.selected.emit(self.ann.id)
         if self._dragging is None:
             ev.ignore()
             return
         ev.accept()
+        if self._dragging == "label":
+            delta = self.mapFromScene(ev.scenePos()) - self._press_local
+            self.label_offset = self._press_offset + delta
+            self.relayout()
+            if ev.isFinish():
+                self._dragging = None
+                offset = self.label_offset
+                self.hub.offset_changed.emit(self.ann.id, offset.x(), offset.y())
+            return
         scene_pos = ev.scenePos()
         x = self.sub.view_box.mapSceneToView(scene_pos).x()  # X is shared by all views
         series_id = self.points[self._dragging][0]
@@ -696,6 +745,18 @@ class DeltaAnnotationItem(pg.GraphicsObject):
     def mouseClickEvent(self, ev) -> None:
         if not _handle_click(self, self.ann, self.hub, ev):
             ev.accept()
+
+
+LINE_STYLE_CHOICES = (
+    (Msg.STYLE_SOLID, "solid"),
+    (Msg.STYLE_DASH, "dash"),
+    (Msg.STYLE_DOT, "dot"),
+)
+LINE_STYLES = {
+    "solid": Qt.PenStyle.SolidLine,
+    "dash": Qt.PenStyle.DashLine,
+    "dot": Qt.PenStyle.DotLine,
+}
 
 
 ITEM_CLASSES: dict[str, type] = {
@@ -1104,7 +1165,10 @@ class AnnotationManager(QObject):
         ann = self.store.get(ann_id)
         if ann is None:
             return
-        ann.offset_x, ann.offset_y = dx, dy
+        if ann.kind == "delta":
+            ann.label_dx, ann.label_dy = dx, dy  # position of the label
+        else:
+            ann.offset_x, ann.offset_y = dx, dy  # position of the bubble around its point
         self.store.update(ann)
 
     def move(self, ann_id: str, x: float, y: float, x2: float) -> None:
@@ -1291,9 +1355,25 @@ class AnnotationManager(QObject):
                 action = menu.addAction(tr(label), partial(self.toggle_flag, ann_id, field))
                 action.setCheckable(True)
                 action.setChecked(bool(getattr(ann, field)))
+            style_menu = menu.addMenu(tr(Msg.ANN_LINE_STYLE))
+            for label, style in LINE_STYLE_CHOICES:
+                action = style_menu.addAction(
+                    tr(label), partial(self.set_field, ann_id, "line_style", style)
+                )
+                action.setCheckable(True)
+                action.setChecked(ann.line_style == style)
+            reset = menu.addAction(tr(Msg.ANN_RESET_LABEL), partial(self.set_offset, ann_id, 0, 0))
+            reset.setEnabled(bool(ann.label_dx or ann.label_dy))
         menu.addSeparator()
         menu.addAction(tr(Msg.ANN_DELETE), lambda: self.delete(ann_id))
         return menu
+
+    def set_field(self, ann_id: str, field: str, value: object) -> None:
+        ann = self.store.get(ann_id)
+        if ann is None:
+            return
+        setattr(ann, field, value)
+        self.store.update(ann)
 
     def toggle_flag(self, ann_id: str, field: str) -> None:
         """Flip a boolean display option of an annotation (e.g. ``show_dy`` of a delta)."""

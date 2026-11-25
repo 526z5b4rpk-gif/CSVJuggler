@@ -50,6 +50,11 @@ class Annotation:
     show_inv_dx: bool = True
     show_dy: bool = True
     """Delta only: values shown in the label (Δx, 1/Δx, Δy — or y(A), y(B) if units differ)."""
+    line_style: str = "solid"
+    """Delta only: style of the dimension lines (``solid``, ``dash``, ``dot``)."""
+    label_dx: float = 0.0
+    label_dy: float = 0.0
+    """Delta only: offset of the label from its default place (pixels, y downwards)."""
     offset_x: float = 24.0
     offset_y: float = -36.0
     """Bubble only: bottom-left corner of the bubble relative to its point, in pixels

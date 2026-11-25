@@ -6,6 +6,7 @@ import copy
 
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from csvjuggler.i18n import Msg, tr
 from csvjuggler.model.annotation import Annotation
+from csvjuggler.ui.annotation_items import LINE_STYLE_CHOICES
 from csvjuggler.ui.dialogs.plot_settings_dialog import _spin
 from csvjuggler.ui.widgets import ColorButton, DisposableDialog
 
@@ -60,8 +62,14 @@ class AnnotationDialog(DisposableDialog):
         self.inv_dx_check.setChecked(ann.show_inv_dx)
         self.dy_check = QCheckBox(tr(Msg.ANN_SHOW_DY), self)
         self.dy_check.setChecked(ann.show_dy)
-        for check in (self.dx_check, self.inv_dx_check, self.dy_check):
-            check.setVisible(ann.kind == "delta")  # parented: would float over other forms
+        self.line_style_combo = QComboBox(self)
+        for label, style in LINE_STYLE_CHOICES:
+            self.line_style_combo.addItem(tr(label), style)
+        self.line_style_combo.setCurrentIndex(
+            max(0, self.line_style_combo.findData(ann.line_style))
+        )
+        for widget in (self.dx_check, self.inv_dx_check, self.dy_check, self.line_style_combo):
+            widget.setVisible(ann.kind == "delta")  # parented: would float over other forms
         self.coords_check = QCheckBox(tr(Msg.ANN_LBL_SHOW_COORDS))
         self.coords_check.setChecked(ann.show_coords)
         self.link_check = QCheckBox(tr(Msg.ANN_LBL_LINK_ALL))
@@ -82,6 +90,7 @@ class AnnotationDialog(DisposableDialog):
             for check in (self.dx_check, self.inv_dx_check, self.dy_check):
                 show_box.addWidget(check)
             form.addRow(tr(Msg.ANN_LBL_DELTA_SHOW), show_box)
+            form.addRow(tr(Msg.ANN_LINE_STYLE), self.line_style_combo)
         elif ann.kind != "hline":
             form.addRow(tr(Msg.ANN_LBL_X), self.x_spin)
         if ann.kind in ("text", "hline"):
@@ -118,6 +127,7 @@ class AnnotationDialog(DisposableDialog):
         a.show_dx = self.dx_check.isChecked()
         a.show_inv_dx = self.inv_dx_check.isChecked()
         a.show_dy = self.dy_check.isChecked()
+        a.line_style = self.line_style_combo.currentData()
         a.link_all = self.link_check.isChecked()
         a.x, a.y, a.x2 = self.x_spin.value(), self.y_spin.value(), self.x2_spin.value()
         if a.kind == "region" and a.x2 < a.x:
